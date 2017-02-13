@@ -44,7 +44,7 @@ But. These headlines and stories are **REALLY BORING**. (They are *nothing at al
 
 So what do we learn from doing a "[distant reading](https://books.google.co.nz/books/about/Distant_Reading.html?id=YKMCy9I3PG4C&redir_esc=y)" of KCNA content? In general, as we shall see, nothing too surprising if you have any acquaintance with North Korea. KCNA turns out to produce mostly a sort of humdrum bureaucratic literature that precisely reflects the hierarchies of North Korean politics and draws extensively on nationalist themes, and where the members of the Kim family play a key role. But some things are surprising, such as the particular ways in which the Kims are actually portrayed and celebrated, or the uniformity of its themes over more than 15 years. 
 
-**WARNING: EXCRUCIATINGLY DETAILED DISCUSSION OF SOME OF THE MOST BORING TEXTS EVER PRODUCED IN THE HISTORY OF THE WORLD FOLLOWS. DON'T SAY I DIDN'T WARN YOU**
+**WARNING: EXCRUCIATINGLY DETAILED DISCUSSION OF SOME OF THE MOST BORING TEXTS EVER PRODUCED IN THE HISTORY OF THE WORLD FOLLOWS. DON'T SAY I DIDN'T WARN YOU!**
 
 ```{r extract_mentions}
 
@@ -975,7 +975,7 @@ We can visualize the uniformity of KCNA's content with a [topic model](https://e
 
 ```{r uniformityPerYear, results='hide'}
 
-set.seed(1234)
+set.seed(5555)
 
 tokenizing_function <- function(x) {
   x <- str_to_lower(x)
@@ -1026,16 +1026,17 @@ topic_terms <- as_tibble(phi) %>%
   summarise(terms = paste(terms, collapse = ","))
 
 topic_terms <- topic_terms %>%
-  mutate(topic_descriptive = paste(c("1 Special days of Kims and the nation?", 
-         "2 Kim gifts and tributes?",
-         "8 International solidarity?",
+  mutate(topic_descriptive = paste(c( 
          "10 Anti-USA and other adversaries?",
-         "7 Diplomacy?",
-         "6 National unity?",
+         "9 South Korea critique?",
          "3 Appreciation of Kim works?",
-         "4 Cultural and artistic achievement?",
          "5 Economic and social development?",
-         "9 South Korea critique?"), terms, sep = "\n"),
+         "7 Diplomacy?",
+         "1 Special days of Kims and the nation?",
+         "6 National unity?",
+         "4 Cultural and artistic achievement?",
+         "8 International solidarity?",
+         "2 Kim gifts and tributes?"), terms, sep = "\n"),
          order = str_extract(topic_descriptive, "[0-9]+") %>%
            as.numeric())
 
@@ -1074,7 +1075,7 @@ If we wanted to simplify this picture, we might say that KCNA spends about a qua
 
 ```{r uniformityPerDay, results='hide'}
 
-set.seed(1234)
+set.seed(5555)
 
 date_id <- processed_corpus %>%
   distinct(date, processed_title) %>%
@@ -1120,16 +1121,17 @@ topic_terms <- as_tibble(phi) %>%
   summarise(terms = paste(terms, collapse = ","))
 
 topic_terms <- topic_terms %>%
-  mutate(topic_descriptive = paste(c("1 Special days of Kims and the nation?", 
-         "2 Kim gifts and tributes?",
-         "8 International solidarity?",
+  mutate(topic_descriptive = paste(c( 
          "10 Anti-USA and other adversaries?",
-         "7 Diplomacy?",
-         "6 National unity?",
+         "9 South Korea critique?",
          "3 Appreciation of Kim works?",
-         "4 Cultural and artistic achievement?",
          "5 Economic and social development?",
-         "9 South Korea critique?"), terms, sep = "\n"),
+         "7 Diplomacy?",
+         "1 Special days of Kims and the nation?",
+         "6 National unity?",
+         "4 Cultural and artistic achievement?",
+         "8 International solidarity?",
+         "2 Kim gifts and tributes?"), terms, sep = "\n"),
          order = str_extract(topic_descriptive, "[0-9]+") %>%
            as.numeric())
 
@@ -1240,16 +1242,17 @@ topic_terms <- as_tibble(phi) %>%
   summarise(terms = paste(terms, collapse = ","))
 
 topic_terms <- topic_terms %>%
-  mutate(topic_descriptive = paste(c("6 Diplomacy?", 
-         "10 World disasters?",
-         "4 Cultural and artistic achievement?",
+  mutate(topic_descriptive = paste(c(
          "8 Critique of South Korea and int'l solidarity?",
          "3 Economic and social development?",
-         "5 Sport?",
-         "9 Anti-adversaries?",
+         "2 Homage to the Kims?",
          "7 Reunification?",
-         "1 Achievements of the Kims?",
-         "2 Homage to the Kims?"), terms, sep = "\n"),
+         "4 Cultural and artistic achievement?",
+         "10 World disasters?",
+         "9 Anti-adversaries?",
+         "5 International solidarity?",
+        "6 Diplomacy?", 
+         "1 Achievements of the Kims?"), terms, sep = "\n"),
          order = str_extract(topic_descriptive, "[0-9]+") %>%
            as.numeric())
 
