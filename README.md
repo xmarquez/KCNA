@@ -1,6 +1,6 @@
 # KCNA
 
-This package bundles into a dataset suitable for text analysis most of the headlines produced by the Chongryon-hosted website of the Korean Central News Agency, [kcna.co.jp website](http://www.kcna.co.jp/index-e.htm) between 1 Jan 1997 to 29 September 2014. It also includes some functions useful for NLP analysis. It was used to create [this blogpost](https://abandonedfootnotes.blogspot.com). To install, use:
+This package bundles into a dataset suitable for text analysis most of the headlines produced by the Chongryon-hosted website of the Korean Central News Agency, [kcna.co.jp website](http://www.kcna.co.jp/index-e.htm) between 1 Jan 1997 to 29 September 2014. It also includes some functions useful for NLP analysis. It was used to create [this essay](https://xmarquez.github.io/KCNA/Reading_KCNA_headlines.html). To install, use:
 
 ``` r
 # install.packages("devtools")

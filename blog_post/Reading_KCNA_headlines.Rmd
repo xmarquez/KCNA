@@ -1,8 +1,10 @@
 ---
 title: "Propaganda as Literature: A Distant Reading of the Korean Central News Agency's Headlines"
+author: "Xavier Marquez"
 output: 
   html_document: 
     self_contained: no
+    toc: yes
 ---
 
 ```{r setup, include=FALSE}
@@ -1066,7 +1068,7 @@ data %>%
 rm(data, year_id)
 ```
 
-(Note the increase in Kim topics in 2012, the year after the death of Kim Jong Il in December 2011. See a more detailed [interactive topic browser here](http://htmlpreview.github.io/?https://github.com/xmarquez/KCNA/blob/master/Reading_KCNA_headlines_files/ldavis_annual/index.html). Topic numbers in the interactive visualization will be different from those above).
+(Note the increase in Kim topics in 2012, the year after the death of Kim Jong Il in December 2011. See a more detailed [interactive topic browser here](Reading_KCNA_headlines_files/ldavis_annual/index.html). Topic numbers in the interactive visualization will be different from those above).
 
 If we wanted to simplify this picture, we might say that KCNA spends about a quarter of the time praising and honoring the Kims, another quarter critiquing North Korea's adversaries, and the rest extolling North Korea's economic and cultural development and its cooperative disposition. The daily variation in these topics is of course much higher than their annual variation, but the trends are flat, and many (not all) peaks in some of these topics correspond to days where the topic is expected to peak (e.g., cult days for the "homage to Kims" topic):
 
@@ -1293,7 +1295,7 @@ levels(topic_proportions_per_date$topic_descriptive) %>%
 
 ```
 
-And if you're interested, [here's an interactive topic browser](http://htmlpreview.github.io/?https://github.com/xmarquez/KCNA/blob/master/Reading_KCNA_headlines_files/ldavis/index.html) for the model (topic numbers are different from those above).
+And if you're interested, [here's an interactive topic browser](Reading_KCNA_headlines_files/ldavis/index.html) for the model (topic numbers are different from those above).
 
 Topic models do not always give intuitive results, and the specific terms that would be salient in a given model will vary depending on the random seed, the number of topics chosen, and the specific software used. But in general, it seems to be the case that KCNA propaganda is relatively uniform in time, with only large shocks (like the death of Kim Jong Il above) making much of a difference in its choice of topics.
 
@@ -1301,9 +1303,9 @@ Topic models do not always give intuitive results, and the specific terms that w
 
 In some ways, none of the patterns discussed above should be surprising. It is well known that North Korean propaganda is highly nationalistic; that it fosters a cult of the Kims; and that it can be filled with invective against the North's adversaries. But it is still interesting to see concretely how these patterns are manifested in content that can hardly have much persuasive effect, given its audience. KCNA propaganda is not, by the instrumental standards usually applied to these matters, a great success for outside audiences (unlike, e.g., the information operations of the Russian state, or perhaps the internal propaganda used in North Korea itself). As a kind of literature, however, displaying a fictional picture of reality without much regard for its effectiveness, there is something remarkable in the single-mindedness of its adherence to its own self-imposed canons.
 
-## Data and code technical details
+## Data and code details
 
-I've bundled the data used to produce this post in an R package, available from [this repository](https://github.com/xmarquez/KCNA). To install from R, use `devtools::install_github(repo = "xmarquez/KCNA")`. Check the Readme file for more info. The code used to produce this post is available [here as an .Rmd file](https://github.com/xmarquez/KCNA/blog_post/Reading_KCNA_headlines.Rmd); there may be a paper eventually too. 
+I've bundled the data used to produce this post in an R package, available from [this repository](https://github.com/xmarquez/KCNA). To install from R, use `devtools::install_github(repo = "xmarquez/KCNA")`. Check the Readme file for more info. The code used to produce this post is available [here as an .Rmd file](https://github.com/xmarquez/KCNA/blob/master/blog_post/Reading_KCNA_headlines.Rmd); there may be a paper eventually too. 
 
 Finally, a couple of shout outs. [Julia Silge's `tidytext` package](http://juliasilge.com/blog/Life-Changing-Magic/) is great -- it really simplifies text analysis! If you do any kind of text analysis, I highly recommend it. And [Dmitriy Selivanov](http://dsnotes.com/)'s [`text2vec` package](http://text2vec.org/) implementation of topic modeling and word vector embedding is superfast and powerful; also highly recommended. 
 
