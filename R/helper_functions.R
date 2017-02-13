@@ -315,7 +315,7 @@ fix_html_for_blogpost <- function(htmlfilename) {
 
   file <- readr::read_lines(htmlfilename)
 
-  file <- str_replace_all(file, "Reading_KCNA_headlines_files/", "https://raw.githubusercontent.com/xmarquez/KCNA/master/Reading_KCNA_headlines_files/")
+  file <- str_replace_all(file, "Reading_KCNA_headlines_files/", "https://raw.githubusercontent.com/xmarquez/KCNA/master/blog_post/Reading_KCNA_headlines_files/")
 
   readr::write_lines(file, "blog_post/Reading_KCNA_headlines_blogspot.html")
 
