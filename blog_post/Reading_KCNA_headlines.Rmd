@@ -1307,7 +1307,7 @@ In some ways, none of the patterns discussed above should be surprising. It is w
 
 I've bundled the data used to produce this post in an R package, available from [this repository](https://github.com/xmarquez/KCNA). To install from R, use `devtools::install_github(repo = "xmarquez/KCNA")`. Check the Readme file for more info. The code used to produce this post is available [here as an .Rmd file](https://github.com/xmarquez/KCNA/blob/master/blog_post/Reading_KCNA_headlines.Rmd); there may be a paper eventually too. 
 
-Finally, a couple of shout outs. [Julia Silge's `tidytext` package](http://juliasilge.com/blog/Life-Changing-Magic/) is great -- it really simplifies text analysis! If you do any kind of text analysis, I highly recommend it. And [Dmitriy Selivanov](http://dsnotes.com/)'s [`text2vec` package](http://text2vec.org/) implementation of topic modeling and word vector embedding is superfast and powerful; also highly recommended. 
+Finally, a couple of shout outs. [Julia Silge and David Robinson's `tidytext` package](http://juliasilge.com/blog/Life-Changing-Magic/) is great -- it really simplifies text analysis! If you do any kind of text analysis, I highly recommend it. And [Dmitriy Selivanov](http://dsnotes.com/)'s [`text2vec` package](http://text2vec.org/) implementation of topic modeling and word vector embedding is superfast and powerful; also highly recommended. 
 
 [^changes]: It may have changed by now, though I doubt it. I can't access it anymore, so I wouldn't know. 
 
