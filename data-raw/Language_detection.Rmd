@@ -1,0 +1,577 @@
+---
+title: "Language detection and minor fixes to headlines"
+author: "Xavier Marquez"
+date: "11 July 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      cache = TRUE)
+
+library(dplyr)
+library(readr)
+library(textcat)
+library(tidytext)
+library(stringr)
+
+```
+
+## Automated language detection
+
+The scraped KCNA headlines come in two languages, English and Spanish, but there's no easy way for a computer to distinguish between them. In later years there is some indication in the link about whether the headline is in English or Spanish, but not always, and these indications do not exist in earlier years. But in order to do useful analyses of the text, we need to know their language. And it is harder than it looks to get an algorithm to correctly classify headlines as either english or spanish! I used five different algorithms, averaged their results, and did some manual adjustment at the end to get to a reasonably certain language classification:
+
+First we load the raw headlines and partially fix up the encoding:
+
+```{r preparatory}
+
+headlines <- read_csv("./All.links.csv", col_types = cols(date=col_date(format = "%m/%d/%Y")))
+
+headlines$title <- qdap::mgsub(pattern = c("\xE3\x80\x80"),
+                         replacement = c(""),
+                         text.var = headlines$title,
+                         useBytes = TRUE) 
+
+headlines <- headlines %>% mutate(title = stringr::str_conv(title, "UTF-8"))
+
+tools::showNonASCII(headlines$title)
+
+```
+
+We use the package `textcat` for a first pass at language detection:
+
+```{r textcat_package, dependson=-1}
+
+headlines$lang <- textcat(headlines$title)
+
+```
+
+The file `headlines` comes with two columns, `lang2` and `lang3`, that represent the results of two distinct language detection algorithms in Python (not shown here).
+
+For headlines after a certain year, some indication of the language is given in the HTML of the story:
+
+```{r headline_link_method, dependson=-1}
+
+headlines <- headlines %>% mutate(link_english = grepl("ee.htm",story.link))
+
+```
+
+But for the next method we use a brute force approach: calculating the proportion of words found in spanish or english wordlists, and classifying a headline as either english or spanish depending on whether the proportion of words in the headline in each language is larger or smaller:
+
+```{r spanish_wordlist, warning=FALSE, dependson=-1}
+
+spanish <- read_lines("./spanishwordlist.txt")
+
+spanish <- str_conv(spanish, "UTF-8")
+
+# We want versions of the words with and without accents
+
+spanish_2 <- str_replace_all(spanish,c("á"),c("a"))
+spanish_2 <- str_replace_all(spanish,c("é"),c("e"))
+spanish_2 <- str_replace_all(spanish,c("í"),c("i"))
+spanish_2 <- str_replace_all(spanish,c("ó"),c("o"))
+spanish_2 <- str_replace_all(spanish,c("ú"),c("u"))
+
+spanish_words <- unique(c(spanish,spanish_2))
+
+rm(spanish,spanish_2)
+
+# We also add a number of other spanish words that are normally found in headlines but for some reason are not in the wordlist:
+
+spanish_words <- c(spanish_words, "universiad","universiade","tecnologia",
+                   "comitiva","tete","futsal","serveâ","continuan","y","de",
+                   "la","del","en","con","se","envia","por")
+
+length(spanish_words)
+
+```
+
+```{r english_wordlist, dependson=-1}
+
+english <- read_lines("http://www-01.sil.org/linguistics/wordlists/english/wordlist/wordsEn.txt")
+
+english <- c(english,"internet","homepage","website","weightlifter","websites","weaponization",
+             "warhawks","trademarked","prefectural","spanish","organisation","reinvasion",
+             "quarterfinals","organisations","folkcraft","confrontational","concours",
+             "militarization","liberalist","neo","footballers","juche","wrongdoings",
+             "warmaniacs","stockbreeding","bioindustry","flunkeyist","servicepersons",
+             "ferroalloy","online","comgratulations","multilateralism","misbehaviour",
+             "modernising","maneuverings","councillors","contries","conscienc","bln",
+             "euros","usd","gnp","antidiabetic","antiterrorists","noninvasive")
+
+english_2 <- read_lines("https://raw.githubusercontent.com/dwyl/english-words/master/words.txt")
+
+english_words <- unique(c(english,english_2))
+
+rm(english_2,english)
+
+length(english_words)
+
+```
+
+```{r calculate_proportions, dependson=-1}
+
+data <- unnest_tokens(headlines %>% select(date,title), output = words, input = title, drop=FALSE)
+
+data <- data %>% 
+  mutate(in_english = words %in% english_words, in_spanish = words %in% spanish_words, in_neither = !in_english & !in_spanish) %>% 
+  group_by(date,title) %>% 
+  summarise(prop_english = sum(in_english)/(n()-sum(in_neither)), prop_spanish = sum(in_spanish)/(n()-sum(in_neither))) %>% 
+  ungroup() %>% 
+  mutate(prop_english = ifelse(is.nan(prop_english), 0, prop_english), prop_spanish = ifelse(is.nan(prop_spanish), 0, prop_spanish)) 
+
+headlines <- left_join(headlines,data)
+
+rm(english_words,spanish_words,data)
+
+```
+
+We can now calculate an overall "score" for how probable it is that the headline is in English according to all of these methods:
+
+```{r probability_english, dependson=-1}
+
+headlines <- headlines %>% 
+  mutate(english_prob = ((lang == "english") + (lang2 == "en") + (lang3 == "en") + 
+                           link_english + (prop_english > prop_spanish) + 
+                           (prop_spanish == 0 | prop_english == 1) + 
+                           2*((prop_english - prop_spanish)>=0.5))/8, 
+         english = (english_prob >= 0.5))
+
+```
+
+And we are now in a position to do some testing:
+
+```{r tests, dependson=-1}
+
+headlines %>% 
+  select(title,lang:prop_spanish) %>% 
+  filter(!english,prop_english > prop_spanish) %>% 
+  sample_n(10) %>% knitr::kable()
+
+headlines %>% 
+  select(title,lang:prop_spanish) %>% 
+  filter(english,prop_spanish > prop_english) %>% 
+  knitr::kable()
+
+headlines %>% 
+  select(title,lang:prop_spanish) %>% 
+  filter(!english) %>% 
+  sample_n(10) %>% 
+  knitr::kable()
+
+headlines %>% 
+  select(title,lang:prop_spanish) %>% 
+  filter(english) %>% 
+  sample_n(10) %>% 
+  knitr::kable()
+
+headlines %>% 
+  select(title,lang:prop_spanish) %>% 
+  filter(prop_english == 0, prop_spanish == 0) %>% 
+  knitr::kable()
+
+```
+
+# Manual fixes
+
+We now manually fix some spanish titles. First we identify a set of such titles:
+
+```{r manual_fix1, dependson=-1}
+
+headlines <- headlines %>%
+  ungroup() %>%
+  arrange(date,story.link) %>%
+  mutate(english = if_else(is.na(english), TRUE, english))
+
+spanish_titles <- unnest_tokens(headlines, output = words, input = title, drop=FALSE) %>%
+  filter(english) %>%  
+  group_by(title) %>%
+  filter(any(words %in% c("y","de","la","del","en","con","se","envia","por","dirige","otorgado","felicita","mensaje")),
+         !any(words %in% c("bier","obituary","of","famous","korean","korea","from","friendship"))) %>%
+  ungroup() %>%
+  distinct(title)
+
+spanish_titles %>% knitr::kable()
+
+nrow(spanish_titles)
+
+```
+
+And now we manually fix the english language indicator:
+
+```{r manual_fix2, dependson=-1}
+
+headlines <- headlines %>% 
+  mutate(english = if_else((title %in% spanish_titles$title), FALSE, english))
+
+# Test
+unnest_tokens(headlines, output = words, input = title, drop=FALSE) %>%
+  filter(english) %>%
+  group_by(title) %>%
+  filter(any(words %in% c("y","de","la","del","en","con","se","envia","por","dirige","otorgado","felicita","mensaje"))) %>%
+  ungroup() %>%
+  distinct(title) %>%
+  knitr::kable()
+
+
+
+```
+
+There are still other titles with problems:
+
+```{r fix_funny_encodings, dependson=-1}
+
+headlines %>% 
+  filter(grepl("Ã³|Â´|Ãº|Ã|Ã±|Ã±|Ã©|ã€€|i‚Â\u0081@|i±|i©|â€™|Â–|Â—|Âª|i¡|i¼|ï¼\u008d|Âº|iÂ|Â¿|Ã‚|i‚Â\u0081f|i‚Â\u0081g|i‚Â\u0081h|i‚Â¡i‚Â¡|i‚Â‚v|Â@",title)) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("\xC2\xAD",title)) %>% 
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("\\r\\n",title)) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("=",title)) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("@",title)) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+headlines$title <- qdap::mgsub(pattern = c("Ã³", "Â´", "Ãº", "Ã", "Ã±", "Ã©", "ã€€", "i‚Â\u0081@", 
+                        "i±", "i©", "â€™", "Â–", "Âª", "i¡", "i¼", "ï¼\u008d", 
+                        "Âº", "iÂ", "Â¿", "Ã‚", "i‚Â\u0081f", "i‚Â\u0081g", "i‚Â\u0081h", 
+                        "i‚Â¡i‚Â¡", "i‚Â‚v", "="),
+            replacement = c("o", "'", "u", "i", "n", "e", "", " ",
+                            "n", "e", "'", " - ", "a", "a", "u", "-", 
+                            "o", "a", "", "", "'", "'", "'", 
+                            " ", "W", "-"),
+            text.var = headlines$title)
+
+headlines$title <- qdap::mgsub(pattern = c("\xC2\xAD", "[\xC3\x82\xC2\x81]+g", "[\xC3\x82\xC2\x81]+h"),
+                               replacement = c("", " "," ' "), 
+                               text.var = headlines$title,
+                               useBytes = TRUE,
+                               fixed = FALSE)
+
+headlines$title <- str_replace_all(headlines$title,"\\r\\n","\n")
+
+headlines <- headlines %>% tidyr::separate_rows(title, sep = "[\\n]+")
+
+# Testing
+headlines %>% 
+  filter(grepl("Ã³|Â´|Ãº|Ã|Ã±|Ã±|Ã©|ã€€|i‚Â\u0081@|i±|i©|â€™|Â–|Â—|Âª|i¡|i¼|ï¼\u008d|Âº|iÂ|Â¿|Ã‚|i‚Â\u0081f|i‚Â\u0081g|i‚Â\u0081h|i‚Â¡i‚Â¡|i‚Â‚v",title)) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("\xC2\xAD",title))%>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("\\r\\n",title)) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("\\n",title)) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("=",title)) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("@",title)) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(title %in% c(" ","")) %>%
+  distinct(title) %>%
+  knitr::kable()
+
+
+```
+
+There are also some headlines that are incorrect:
+
+```{r incorrect_headlines, dependson=-1}
+
+headlines %>%
+  filter(grepl("For Spanish-speaking people",title)) %>%
+  distinct(date,title) %>%
+  knitr::kable()
+
+headlines <- headlines %>% 
+  mutate(title = plyr::mapvalues(title,
+                                 from = c("For Spanish-speaking peopleRodong Sinmun denuncia autoridades surcoreanas de seguridad publica Venezuela: obra de Kim Jong Il en folleto Periodicos llaman a intensificar la lucha por la independencia UTAC revela usurpacion de tierra de los imperialistas japoneses",
+                                          "For Spanish-speaking peopleEE.UU. es archi-violador de DDHH, denuncia Rodong Sinmun Rodong Sinmun define el caracter de los tres movimientos patrioticos RPDC, semifinalista en campeonato asiatico de futbol sub-19 Sudafrica: grupo de estudio de ideas progresistas",
+                                          "For Spanish-speaking peopleEE.UU. no podra evitar un golpe demoledor - Comentario de ATCC - Vocero de MINREX comenta pruebas nucleares en Sur de Corea RPDC apoya justa causa de gobierno y pueblo de Siria"),
+                                 to = c("Rodong Sinmun denuncia autoridades surcoreanas de seguridad publica\nVenezuela: obra de Kim Jong Il en folleto\nPeriodicos llaman a intensificar la lucha por la independencia\nUTAC revela usurpacion de tierra de los imperialistas japoneses",
+                                        "EE.UU. es archi-violador de DDHH, denuncia Rodong Sinmun\nRodong Sinmun define el caracter de los tres movimientos patrioticos\nRPDC, semifinalista en campeonato asiatico de futbol sub-19\nSudafrica: grupo de estudio de ideas progresistas",
+                                        "EE.UU. no podra evitar un golpe demoledor - Comentario de ATCC -\nVocero de MINREX comenta pruebas nucleares en Sur de Corea\nRPDC apoya justa causa de gobierno y pueblo de Siria")))
+
+headlines <- headlines %>% 
+  mutate(title = plyr::mapvalues(title,
+                                 from = c("Gift to Secy. Kim Jong Il from Thai parliamentary delegationGift to Secy. Kim Jong Il from Thai parliamentary delegation",
+                                          "FM spokesman on U.S. attempt  at armed intervention in AfricaTalks between WPK and Movement for Peace and Socialism of Italy",
+                                          "Dialogue and maneuverings are incompatibleKim Jong Il eulogized",
+                                          "Songun Policy Is Invincible Mode of Politics EmbodyingRevolutionary Comradeship",
+                                          "Monument to Victory Battle in Northern Area of KoreaHanded over",
+                                          "Kim Yong NamGreets Moroccan King",
+                                          "Foreign Guests Pay Homage to Kim Il SungThree Books on Koryo Medicine",
+                                          "Kim Jong Il InspectsIndustrial Establishments in Jagang",
+                                          "Kim Yong NamGreets Ghanaian President",
+                                          "Senior Party, State and ArmyOfficials Visit Mangyongdae",
+                                          "Truth behind Ukishima-maru ExplosionDPRK Order Awarded to Iranian Ambassador",
+                                          "Japan Has Never Made Effort to Reflect on Its Past: GermanPaper",
+                                          "EnPyongyang la delegacion de Kyodo",
+                                          "Soldier Restored to Life from Jaws of DeathDeclaracion de portavoz de Estado Mayor General de EPC",
+                                          "Kim Yong NamGreets Austrian President",
+                                          "Japanese Kimjongilia Fanciers Society Releases Its InauguralBulletin",
+                                          "FM spokesman on U.S. attempt at armed intervention in AfricaTalks between WPK and Movement for Peace and Socialism of Italy"),
+                                 to = c("Gift to Secy. Kim Jong Il from Thai parliamentary delegation",
+                                        "FM spokesman on U.S. attempt  at armed intervention in Africa\nTalks between WPK and Movement for Peace and Socialism of Italy",
+                                        "Dialogue and maneuverings are incompatible\nKim Jong Il eulogized",
+                                        "Songun Policy Is Invincible Mode of Politics Embodying Revolutionary Comradeship",
+                                        "Monument to Victory Battle in Northern Area of Korea Handed over",
+                                        "Kim Yong Nam Greets Moroccan King",
+                                        "Foreign Guests Pay Homage to Kim Il Sung\nThree Books on Koryo Medicine",
+                                        "Kim Jong Il Inspects Industrial Establishments in Jagang",
+                                        "Kim Yong Nam Greets Ghanaian President",
+                                        "Senior Party, State and Army Officials Visit Mangyongdae",
+                                        "Truth behind Ukishima-maru Explosion\nDPRK Order Awarded to Iranian Ambassador",
+                                        "Japan Has Never Made Effort to Reflect on Its Past: German Paper",
+                                        "En Pyongyang la delegacion de Kyodo",
+                                        "Soldier Restored to Life from Jaws of Death\nDeclaracion de portavoz de Estado Mayor General de EPC",
+                                        "Kim Yong Nam Greets Austrian President",
+                                        "Japanese Kimjongilia Fanciers Society Releases Its Inaugural Bulletin",
+                                        "FM spokesman on U.S. attempt at armed intervention in Africa\nTalks between WPK and Movement for Peace and Socialism of Italy")))
+
+headlines <- headlines %>% tidyr::separate_rows(title, sep = "[\\n]+")
+
+headlines %>%
+  filter(grepl("For Spanish-speaking people",title)) %>%
+  distinct(date,title) %>%
+  knitr::kable()
+
+headlines <- headlines %>% filter(title != "For Spanish-speaking people")
+
+headlines %>%
+  filter(grepl("Rodong Sinmun denuncia autoridades surcoreanas de seguridad publica|Rodong Sinmun define el caracter de los tres movimientos patrioticos|Vocero de MINREX comenta pruebas nucleares en Sur de Corea",title)) %>%
+  distinct(date,title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("[a-z][A-Z]", title)) %>%
+  distinct(date,title) %>%
+  knitr::kable()
+
+
+```
+
+But there are still some titles that are incorrectly classified as English when they should be spanish:
+
+```{r misclassified_spanish_titles, dependson=-1}
+
+spanish_titles <- headlines %>%
+  filter(grepl("EE\\.UU|RPDC|UTAC|surcorea|cory|\\bEPC\\b",title,ignore.case = TRUE), english) 
+
+spanish_titles %>% 
+  distinct(date,title) %>% 
+  knitr::kable()
+
+headlines <- headlines %>% mutate(english = if_else((title %in% spanish_titles$title), FALSE, english))
+ 
+headlines %>%
+   filter(grepl("EE\\.UU|RPDC|UTAC|surcorea|cory|\\bEPC\\b",title,ignore.case = TRUE), english) %>%
+   distinct(date,title) %>%
+   knitr::kable()
+
+```
+
+And some English titles that should be Spanish:
+
+```{r misclassified_english_titles, dependson=-1}
+
+english_titles <- headlines %>%
+  filter(!english) %>%
+  unnest_tokens(output = words, input = title, drop=FALSE) %>%
+  group_by(title) %>%
+  filter(any(words %in% c("arrives","strike","film","dance","house","sweet","dprk","korean","korea","factory","temple","water","war","valuable")) |
+           (title %in% c("Real nuclear criminal","Tano festival","Hyangsan Hotel","Ryanggang Hotel","Pothonggang Hotel","Popular hotel")),
+         !any(words %in% c("desmienten","cursillo"))) %>%
+  ungroup() %>%
+  distinct(title) %>%
+  .$title
+
+english_titles
+
+headlines <- headlines %>% mutate(english = if_else((title %in% english_titles), TRUE, english))
+
+rm(spanish_titles,english_titles)
+```
+
+Finally, some titles have other fixable problems:
+
+```{r other_fixable_problems, dependson=-1}
+headlines %>% 
+  filter(grepl("^[0-9]+[\\-]?\\t",title)) %>%
+  distinct(date,title) %>%
+  knitr::kable()
+
+headlines$title <- str_replace_all(headlines$title,"^[0-9]+[\\-]?\\t","")
+
+headlines %>% 
+  filter(grepl("\\t",title)) %>%
+  distinct(date,title) %>%
+  knitr::kable()
+
+headlines$title <- str_replace_all(headlines$title,"\\t","")
+
+headlines %>% 
+  filter(grepl("^[0-9]+([A-Z])",title)) %>%
+  distinct(date, title) %>%
+  knitr::kable()
+ 
+headlines$title <- str_replace_all(headlines$title,"^[0-9]+([A-Z])","\\1")
+
+headlines %>% 
+  filter(grepl("KCNA Warns Hack Writers against Involvement in Anti-DPRK Psychological Warfare",title)) %>%
+  distinct(date, title) %>%
+  knitr::kable()
+
+headlines %>% 
+  filter(grepl("#",title)) %>%
+  distinct(date, title) %>%
+  knitr::kable()
+
+headlines <- headlines %>% filter(!grepl("#",title))
+
+headlines %>% 
+  filter(grepl("cincuento",title)) %>%
+  distinct(date, title, english) %>%
+  knitr::kable()
+ 
+headlines <- headlines %>% mutate(english = ifelse(grepl("cincuento",title), FALSE, english))
+
+headlines %>% 
+  filter(grepl("homenaje",title), english) %>%
+  distinct(date, title, english) %>%
+  knitr::kable()
+
+headlines <- headlines %>% mutate(english = ifelse(grepl("homenaje",title), FALSE, english))
+
+headlines %>% 
+  filter(grepl("publica informacion",title)) %>%
+  distinct(date, title, english) %>%
+  knitr::kable()
+ 
+headlines <- headlines %>% mutate(english = ifelse(grepl("publica informacion",title), FALSE, english))
+
+headlines %>% 
+  filter(grepl("agradece",title),english) %>%
+  distinct(date, title, english) %>%
+  knitr::kable()
+ 
+headlines <- headlines %>% mutate(english = ifelse(grepl("agradece",title), FALSE, english))
+
+headlines %>% 
+  filter(grepl("Kim Il Sung\\.s",title)) %>%
+  distinct(date, title, english) %>%
+  knitr::kable()
+ 
+headlines <- headlines %>% mutate(title = str_replace(title, "Kim Il Sung\\.s","Kim Il Sung's"))
+
+headlines %>% 
+  filter(grepl("\\bInt[[:punct:]]",title),!english) %>%
+  distinct(date, title, english) %>%
+  knitr::kable()
+
+# headlines <- headlines %>% mutate(english = ifelse(grepl("Int'l",title), TRUE, english))
+
+headlines %>% 
+  filter(is.na(english_prob)) %>%
+  distinct(date, title, english) %>%
+  knitr::kable()
+
+```
+
+Finally, we can do a random sample test:
+
+```{r random_sample, cache = FALSE}
+
+# First english:
+
+headlines %>%
+  filter(english) %>%
+  sample_n(20) %>%
+  distinct(date,title, english) %>%
+  knitr::kable()
+
+# Then spanish
+
+headlines %>%
+  filter(!english) %>%
+  sample_n(20) %>%
+  distinct(date,title, english) %>%
+  knitr::kable()
+
+
+```
+
+And we check the performance of the various algorithms for language detection:
+
+```{r AUC, dependson=-2}
+
+
+library(pROC)
+
+predictions_numeric <- headlines %>%
+  select(title,lang:english,prop_english,prop_spanish) %>%
+  mutate(lang = as.numeric(grepl("english",lang)),
+         lang2 = as.numeric(grepl("en",lang2)),
+         lang3 = as.numeric(grepl("en",lang3)),
+         link_english = as.numeric(link_english),
+         english = as.numeric(english))
+
+predictions_numeric %>%
+  head(10) %>%
+  knitr::kable()
+
+summary(predictions_numeric)
+
+plot(roc(predictions_numeric$english, predictions_numeric$lang))
+plot(roc(predictions_numeric$english, predictions_numeric$lang))
+plot(roc(predictions_numeric$english, predictions_numeric$lang2))
+plot(roc(predictions_numeric$english, predictions_numeric$lang3))
+plot(roc(predictions_numeric$english, predictions_numeric$link_english))
+plot(roc(predictions_numeric$english, predictions_numeric$english_prob))
+plot(roc(predictions_numeric$english, predictions_numeric$prop_english))
+plot(roc(predictions_numeric$english, predictions_numeric$prop_spanish))
+
+
+```
+
+Finally, we can save the data:
+
+```{r saving, dependson=-1}
+names(headlines)
+
+headlines <- headlines %>% select(date, title, english, english_prob, story.link, index.link)
+
+devtools::use_data(headlines,overwrite = TRUE)
+
+```
+
+

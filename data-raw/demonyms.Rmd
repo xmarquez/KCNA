@@ -1,0 +1,79 @@
+---
+title: "Extracting list of demonyms"
+author: "Xavier Marquez"
+date: "6 July 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache= TRUE)
+```
+
+We use the list of demonyms from a table at http://www.geography-site.co.uk/pages/countries/demonyms.html
+
+```{r read_table}
+library(dplyr)
+library(stringr)
+library(rvest)
+
+demonyms <- read_html("http://www.geography-site.co.uk/pages/countries/demonyms.html") %>%
+  html_node("tbody") %>%
+  html_text(trim = TRUE) %>%
+  str_split("[\\r\\n]") %>%
+  .[[1]] %>%
+  .[ . != ""] %>%
+  .[3:length(.)]
+```
+
+Unfortunately the table is very messy. So we need to clean it up:
+
+```{r fix_table}
+demonyms <- data_frame(country = demonyms[1:length(demonyms) %% 2 == 1], demonym = demonyms[1:length(demonyms) %% 2 == 0]) %>%
+  mutate(country = str_trim(country, side = "both"), 
+         demonym = str_trim(demonym, side = "both"),
+         demonym = str_replace_all(demonym, " => .+$", ""),
+         demonym = str_replace_all(demonym, " \\(.+$", ""),
+         demonym = str_replace_all(demonym, " or ", "|"),
+         demonym = str_replace_all(demonym, ", ", "|"),
+         demonym = str_replace_all(demonym, " - also ", "|"),
+         demonym = str_replace_all(demonym, "'s$", ""),
+         demonym = str_replace_all(demonym, "r \\|", "r|"),
+         demonym = str_replace_all(demonym, "\\(.+$", ""),
+         demonym = str_replace_all(demonym, ",$", ""),
+         demonym = str_replace_all(demonym, "Antiguans", "Antiguan"),
+         demonym = str_replace_all(demonym, "Barbudans", "Barbudan"))
+
+knitr::kable(head(demonyms))
+```
+
+We also add latitude, longitude, and info for the demonym "korean" (common in the KCNA headlines), and save the data:
+
+```{r additional_info}
+library(PoliticalDatasets)
+
+demonyms$year <- 2016
+
+demonyms <- to_gw_system(demonyms)
+
+demonyms <- demonyms %>% select(-year,-in_cow,-in_system,-GW_startdate,-GW_enddate)
+
+demonyms <- demonyms %>% separate_rows(demonym, sep ="\\|") 
+
+demonyms <- bind_rows(demonyms, data_frame(country = "Korea", 
+                                          demonym = "Korean", 
+                                          country_name = "Korea", 
+                                          GWn = 730, 
+                                          GWc = "KOR",
+                                          polity_ccode = 730,
+                                          cown = 730,
+                                          region = "Eastern Asia", 
+                                          continent = "Asia", 
+                                          microstate = FALSE, 
+                                          lat = 35.90776, 
+                                          lon = 127.7669)) %>%
+  arrange(demonym)
+
+knitr::kable(demonyms)
+
+devtools::use_data(demonyms,overwrite = TRUE)
+```

@@ -1,0 +1,32 @@
+Package: KCNA
+Type: Package
+Title: Headlines from the Korean Central News Agency
+Version: 0.1.0
+Authors@R: person("Xavier", "Marquez", role=c("aut", "cre"),
+  email = "marquez.x@gmail.com")
+Description: Contains headlines from KCNA, in a form suitable for text analysis,
+    from 1 Jan 1997 to 29 September 2014.
+License: GPL-3
+Depends:
+    R (>= 2.10)
+Imports:
+    dplyr,
+    tidyr,
+    stringr,
+    networkD3,
+    htmlwidgets,
+    htmltools,
+    readr
+LazyData: TRUE
+RoxygenNote: 6.0.1
+Roxygen: list(markdown = TRUE)
+Suggests:
+    knitr,
+    rmarkdown,
+    tidyverse,
+    tidytext,
+    text2vec,
+    wordcloud,
+    reshape2,
+    ggrepel
+VignetteBuilder: knitr

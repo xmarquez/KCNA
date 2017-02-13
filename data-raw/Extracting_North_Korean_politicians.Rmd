@@ -1,0 +1,87 @@
+---
+title: "Extract officeholders from Wikipedia"
+author: "Xavier Marquez"
+date: "30 January 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(SPARQL)
+library(dplyr)
+library(purrr)
+library(stringr)
+knitr::opts_chunk$set(echo = TRUE, 
+                      cache = TRUE)
+```
+
+Extract all workers party of korea politicians
+
+```{r}
+
+endpoint <- "https://dbpedia.org/sparql/"
+options <- NULL
+
+prefix <- "PREFIX owl: <http://www.w3.org/2002/07/owl#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX type: <http://dbpedia.org/class/yago/>
+PREFIX dc: <http://purl.org/dc/elements/1.1/>
+PREFIX : <http://dbpedia.org/resource/>
+PREFIX dbpedia2: <http://dbpedia.org/property/>
+PREFIX dbpedia: <http://dbpedia.org/>
+"
+
+categories <- c("<http://dbpedia.org/resource/Category:Kim_dynasty_(North_Korea)>",
+                "<http://dbpedia.org/resource/Category:Heads_of_state_of_North_Korea>",
+                "<http://dbpedia.org/resource/Category:Government_ministers_of_North_Korea>",
+                "<http://dbpedia.org/resource/Category:Members_of_the_Supreme_People's_Assembly>",
+                "<http://dbpedia.org/resource/Category:Workers'_Party_of_Korea_politicians>",
+                "<http://dbpedia.org/resource/Category:North_Korean_politicians>",
+                "<http://dbpedia.org/resource/Category:Presidents_of_South_Korea>",
+                "<http://dbpedia.org/resource/Category:Government_ministers_of_South_Korea>",
+                "<http://dbpedia.org/resource/Category:North_Korean_military_personnel>",
+                "<http://dbpedia.org/resource/Category:North_Korean_people_stubs>",
+                "<http://dbpedia.org/resource/Category:Korean_politicians>",
+                "<http://dbpedia.org/resource/Category:North_Korean_people_of_the_Korean_War>")
+
+query <- function(category) {
+  query <- paste(prefix,
+                'select ?uri
+                WHERE { ?uri dct:subject', category, '
+                }')
+  
+  result <- SPARQL(endpoint, query, ns = prefix, extra = options)$result 
+  
+  result <- reshape2::melt(result, measure.vars = 1:ncol(result)) %>%
+    rename(uri = value) %>%
+    select(-variable)
+
+  result <- result %>% 
+    mutate(mentioned = str_replace(uri, "<http://dbpedia.org/resource/(.+)>","\\1") %>%
+             str_replace("_\\(.+\\)", "") %>%
+             str_replace_all("[_-]", " ") %>%
+             str_to_lower() %>%
+             str_replace_all(" ", "_"),
+           category = str_extract(category, ":[\\w_'\\(\\)]+>") %>%
+             str_replace_all("[:>]", "") %>%
+             str_replace_all("_", " "))
+  
+  result
+}
+
+all_persons <- categories %>% map_df(query)
+
+all_persons
+
+person_categories <- all_persons %>%
+  distinct(mentioned, category, uri) %>% 
+  inner_join(counts) %>%
+  arrange(desc(n))
+
+# To use single categories:
+person_categories %>% distinct(mentioned, .keep_all = TRUE)
+
+devtools::use_data(person_categories, overwrite = TRUE) 
+```

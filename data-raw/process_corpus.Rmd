@@ -1,0 +1,360 @@
+---
+title: "Process corpus"
+author: "Xavier Marquez"
+date: "6 July 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(KCNA)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tidytext)
+
+knitr::opts_chunk$set(echo = TRUE, 
+                      cache= TRUE, 
+                      cache.rebuild = FALSE)
+```
+
+## Pre-processed corpus
+
+First we read in the headlines and add the sentiment scores from the different sentiment lexicons:
+
+```{r sentiment}
+
+preprocessed_corpus <- headlines
+
+sentiment_per_title <- preprocessed_corpus %>%
+  filter(english) %>%
+  distinct(title) %>%
+  unnest_tokens(word, title, drop = FALSE) %>%
+  inner_join(sentiments) %>%
+  filter(sentiment %in% c(NA, "negative", "positive")) %>%
+  mutate(score = ifelse(lexicon == "AFINN", score,
+                        ifelse(sentiment == "negative", -1,
+                               ifelse(sentiment == "positive", 1,
+                               score)))) %>%
+  group_by(title, lexicon) %>%
+  summarise(sentiment_score = sum(score)) %>%
+  spread(lexicon, sentiment_score)
+
+preprocessed_corpus <- left_join(preprocessed_corpus, sentiment_per_title)
+
+```
+
+
+We then figure which Korean names are mentioned, and add that info to the corpus:
+
+```{r mentions_of_koreans, dependson=-1}
+
+corpus_tokens <- unnest_tokens(preprocessed_corpus %>% distinct(title), 
+                               output = words, 
+                               input = title, 
+                               drop=FALSE, token = "regex", 
+                               pattern = "[\\W]+", collapse = FALSE)
+
+
+corpus_tokens <- corpus_tokens %>%
+  group_by(title) %>%
+  mutate(words_2 = lead(words), words_3 = lead(words_2)) %>%
+  ungroup()
+
+mentioned <- corpus_tokens %>%
+  select(words, words_2,words_3, title) %>%
+  filter(words %in% korean_names$family_name,
+         words_2 %in% c(korean_names$first_syllable), 
+         words_3 %in% c(korean_names$second_syllable),
+         str_detect(title,str_to_title(paste(words,words_2,words_3)))) %>%
+  distinct(words,words_2,words_3) %>%
+  mutate(mentioned = str_to_title(paste(words,words_2,words_3)))
+
+nrow(mentioned)
+
+knitr::kable(head(mentioned))
+
+corpus_tokens <- left_join(corpus_tokens,mentioned)
+
+corpus_mentions <- corpus_tokens %>%
+  filter(!is.na(mentioned)) %>%
+  distinct(title, mentioned)
+
+preprocessed_corpus <- left_join(preprocessed_corpus, corpus_mentions)
+
+```
+
+We then add columns indicating whether the headline mentions the US, South korea, China, or Japan. The regex for the USA is a bit tricky
+
+```{r mentions_countries, dependson=-1}
+
+preprocessed_corpus <- preprocessed_corpus %>%
+  mutate(mentions_korean = !is.na(mentioned),
+         mentions_us = grepl("(?<!is always with )(?<!always be with )(?<!let )\\bu(\\.)?( )?s(\\.|\b)?(\\.|\b)?(a)?(\\.|\\b)|united states|ee\\.uu",
+                             title,
+                             ignore.case=TRUE, 
+                             perl=TRUE),
+         mentions_south_korea = grepl("s\\..korea|s\\.korea|south korea|^s korea| s korea|surcorea|sur de corea|corea del sur|\\brok\\b",
+                                      title,
+                                      ignore.case=TRUE),
+         mentions_japan = grepl("japan|japon",
+                                title,
+                                ignore.case=TRUE),
+         mentions_china = grepl("\\bchina|\\bchine|\\bprc\\b",
+                                title,ignore.case=TRUE))
+
+preprocessed_corpus <- preprocessed_corpus %>%
+  group_by(title) %>%
+  mutate(mentions_south_korea = ifelse(any(mentioned %in% c("Jo Myong Rok","Im Rok Jae")),
+                                       FALSE, mentions_south_korea)) %>%
+  ungroup()
+
+rm(corpus_tokens,corpus_mentions, sentiment_per_title)
+
+preprocessed_corpus %>% 
+  filter(mentions_us) %>% 
+  sample_n(10) %>% 
+  distinct(date,title) %>% 
+  knitr::kable()
+
+preprocessed_corpus %>%
+  filter(mentions_south_korea) %>%
+  sample_n(10) %>%
+  distinct(date,title) %>%
+  knitr::kable()
+
+preprocessed_corpus %>%
+  filter(mentions_japan) %>%
+  sample_n(10) %>%
+  distinct(date,title) %>%
+  knitr::kable()
+
+preprocessed_corpus %>%
+  filter(mentions_china) %>%
+  sample_n(10) %>%
+  distinct(date,title) %>%
+  knitr::kable()
+
+```
+
+Now we save the file:
+
+```{r save_preprocessed_corpus, dependson=-1}
+
+devtools::use_data(preprocessed_corpus, overwrite = TRUE)
+
+```
+
+## Processed corpus
+
+We're going to tag the english-language headlines, and to clean up the titles in various ways. First we find the mentioned people in English, and make sure their names are single words. The "old_title" column contains the pre-cleaned title:
+
+```{r mentioned_connect, dependson=-1}
+
+mentioned <- mentioned %>%
+  mutate(change_to = str_replace_all(mentioned," ", "_"))
+
+word_data <- preprocessed_corpus %>%
+  filter(english) %>%
+  distinct(title) %>%
+  mutate(processed_title = str_to_lower(title),
+         processed_title = qdap::mgsub(paste0("\\b",
+                                              str_to_lower(mentioned$mentioned),"\\b"),
+                                       mentioned$change_to,
+                                       processed_title,
+                                       fixed = FALSE, ignore.case = TRUE, perl=TRUE))
+
+word_data %>% 
+  filter(grepl("_", processed_title)) %>%
+  sample_n(10) %>%
+  distinct(processed_title, title) %>%
+  knitr::kable()
+
+```
+
+We then ensure other potential named entities are highlighted in the text as well, with uppercase and dashes:
+
+```{r change_potential_names, dependson=-1}
+
+word_data <- word_data %>%
+  mutate(processed_title = qdap::mgsub(paste0("\\b",str_to_lower(potential_names$pattern),"\\b"),
+                                       potential_names$change_to,
+                                       processed_title,
+                                       fixed = FALSE, ignore.case = TRUE, 
+                                       perl=TRUE))
+
+word_data %>% 
+  filter(grepl("[A-Z]", processed_title)) %>%
+  sample_n(10) %>%
+  distinct(processed_title, title) %>%
+  knitr::kable()
+
+```
+
+Finally, we expand all abbreviations as best as possible, and uppercase organization names (e.g., DPRK):
+
+```{r expand_abbreviations, dependson=-1}
+
+library(purrr)
+
+# Replace abbreviations
+
+abbrv <- str_extract_all(headlines$title,regex("[A-z]+[\\.]+",ignore_case=TRUE)) %>% 
+  flatten_chr() %>% 
+  unique()
+
+abbrv
+
+word_data <- word_data %>%
+  mutate(processed_title = qdap::mgsub(abbreviations$abbreviation,
+                               paste0(abbreviations$replacement," "),
+                               processed_title,
+                               fixed = FALSE,
+                               ignore.case = TRUE, perl=TRUE))
+
+word_data %>%
+  filter(grepl("\\.", title)) %>%
+  sample_n(10) %>%
+  distinct(title, processed_title) %>%
+  knitr::kable()
+
+```
+
+And now we uppercase organizations:
+
+```{r uppercase_organizations, dependson=-1}
+orgs <- str_extract_all(word_data$title,"\\b[A-Z]{3,7}\\b") %>% 
+  flatten_chr() %>% 
+  unique()
+
+orgs <- orgs[ !(orgs %in% c("INTER","JAPAN","LAW","NEXT","LED")) ]
+
+orgs
+
+word_data <- word_data %>%
+  mutate(processed_title = qdap::mgsub(paste0("\\b",orgs,"\\b"),
+                               orgs,
+                               processed_title,
+                               fixed = FALSE, ignore.case = TRUE, perl=TRUE))
+
+word_data %>%
+  filter(grepl("\\b[A-Z]{3,7}\\b", title)) %>%
+  sample_n(10) %>%
+  distinct(title, processed_title) %>%
+  knitr::kable()
+
+rm(abbrv, orgs)
+
+```
+
+It's important to check that mentions of "USA" are captured in the `mentions_us` column:
+
+```{r check_usa_mentions, dependson=-1}
+
+word_data %>%
+  left_join(preprocessed_corpus) %>%
+  filter(grepl("USA", processed_title), !mentions_us) %>%
+  distinct(title, processed_title) %>%
+  knitr::kable()
+
+word_data %>%
+  left_join(preprocessed_corpus) %>% 
+  filter(!grepl("USA", processed_title), mentions_us) %>%
+  distinct(title, processed_title) %>%
+  knitr::kable()
+
+```
+
+Now we do the POS tagging. This is the bit that sometimes takes a bit of time:
+
+```{r POS_tagging, dependson=-1}
+
+library(openNLP)
+library(NLP)
+
+word_data <- word_data %>% 
+  mutate(title_for_tokenization = str_replace_all(processed_title,
+                                                  "\\b([A-z]+)_([A-z]+)_([A-z]+)\\b",
+                                                  "\\1XXX\\2XXX\\3"),
+         title_for_tokenization = str_replace_all(title_for_tokenization, 
+                                                  "\\b([A-z]+)_([A-z]+)\\b",
+                                                  "\\1XXX\\2"),
+         title_for_tokenization = paste0(title_for_tokenization,"."))
+
+sent_token_annotator <- Maxent_Sent_Token_Annotator()
+word_token_annotator <- Maxent_Word_Token_Annotator()
+pos_token_annotator <- Maxent_POS_Tag_Annotator(probs = TRUE)
+
+annotate_function <- function(s) {
+  num <- which(word_data$title_for_tokenization == s)[1] 
+  if((num %% 1000) == 0) {
+    message("Now doing num ", 
+            num, 
+            " of ",
+            nrow(word_data))
+  }
+    
+  s <- as.String(s)
+  a2 <- annotate(s, list(sent_token_annotator, word_token_annotator,pos_token_annotator))
+  a3w <- subset(a2, type == "word")
+  tags <- sapply(a3w$features, `[[`, "POS")
+  probs <- sapply(a3w$features, `[[`, "POS_prob")
+  data_frame(title_for_tokenization = as.character(s), words = s[a3w], tags, probs)
+}
+
+
+annotated_titles <- word_data$title_for_tokenization %>%
+  map_df(annotate_function) %>%
+  mutate(words = str_replace_all(words, '[\\.\\(\\)\\"\\:,]',""),
+         words = str_replace_all(words, "XXX"," "),
+         words = str_replace_all(words, "^-","")) %>%
+  filter(words != "")
+
+rm(sent_token_annotator, word_token_annotator, 
+   pos_token_annotator, annotate_function, mentioned)
+
+annotated_titles
+```
+
+Some tests of the result to make sure things are ok. Most of the weight should be on "NN" or "NNP" tags for these words, since they are nouns:
+
+```{r test_annotations, dependson=-1}
+
+annotated_titles %>%
+  filter(grepl("Kim Jong Il", words)) %>%
+  count(words, tags, wt = probs, sort = TRUE) %>%
+  knitr::kable()
+
+annotated_titles %>%
+  filter(grepl("Kim Jong Un", words)) %>%
+  count(words, tags, wt = probs, sort = TRUE) %>%
+  knitr::kable()
+
+annotated_titles %>%
+  filter(grepl("Kim Il Sung", words)) %>%
+  count(words, tags, wt = probs, sort = TRUE) %>%
+  knitr::kable()
+
+annotated_titles %>%
+  filter(grepl("[A-z] [A-z]", words)) %>%
+  count(tags, wt = probs, sort = TRUE) %>%
+  knitr::kable()
+
+```
+
+Finally we save the file:
+
+```{r save_processed_corpus, dependson=-1}
+
+
+processed_corpus <- left_join(annotated_titles, word_data) %>%
+  left_join(preprocessed_corpus) 
+
+rm(annotated_titles, word_data)
+
+processed_corpus <- processed_corpus %>% 
+  select(date, processed_title, words, tags, probs, title)
+
+devtools::use_data(processed_corpus, overwrite = TRUE)
+
+```
+

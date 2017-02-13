@@ -1,0 +1,17 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+inst/doc
+other
+data-raw/*.xlsx
+data-raw/*.csv
+data-raw/*.R
+data-raw/*.html
+data-raw/*.txt
+data-raw/Korean_name_syllables_cache
+data-raw/Language_detection_files
+data-raw/Language_detection_cache
+data-raw/process_corpus_cache
+data-raw/demonyms_cache
+blog_post/Reading_KCNA_headlines_cache

@@ -1,0 +1,27 @@
+---
+title: "Abbreviations and other names"
+author: "Xavier Marquez"
+date: "13 July 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(readr)
+library(dplyr)
+
+```
+
+The abbreviations and other anmes live in two excel files that I update as I find new things to include.
+
+```{r saving}
+
+potential_names <- readxl::read_excel("other_mentioned.xlsx") %>% distinct()
+abbreviations <- readxl::read_excel("abbreviations.xlsx") %>% distinct()
+
+devtools::use_data(potential_names,overwrite = TRUE)
+devtools::use_data(abbreviations,overwrite = TRUE)
+
+```
+

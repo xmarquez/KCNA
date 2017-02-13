@@ -1,0 +1,92 @@
+---
+title: "Extract country mentions from headlines"
+author: "Xavier Marquez"
+date: "4 February 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(stringr)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r demonymsAndCountries, message = TRUE, eval = FALSE}
+
+
+demonyms <- KCNA::demonyms %>%
+  select(country_name, demonym, lat, lon) %>%
+  left_join(PoliticalDatasets::data) %>% 
+  select(country_name, demonym, regex, lat, lon) %>%
+  distinct() %>%
+  mutate(regex = str_replace_all(regex, "\\|\\^","\\|\\\\b"),
+         regex = str_replace_all(regex, "\\$",""),
+         regex = str_replace(regex, "^\\^",""),
+         regex = str_replace(regex, "^\\\\b",""),
+         regex = ifelse(country_name == "Korea, People's Republic of", 
+                        "dprk|north korea|people's republic",
+                        ifelse(country_name == "Korea, Republic of", "south korea|\\brok",
+                               ifelse(country_name == "Korea", "(?<!people's republic of)(?<!north)(?<!south).korea",
+                                      regex))),
+         demonym = ifelse(country_name == "Korea, People's Republic of", 
+                        "north korean",
+                        ifelse(country_name == "Korea, Republic of", "south korean",
+                               ifelse(country_name == "Korea", "(?<!north)(?<!south).korean",
+                                      demonym))),
+         regex = plyr::mapvalues(regex, from = c("cen.*\\baf|\\bc\\.?a\\.?r\\.?"),
+                                 to = c("central african rep.+\\b"))) %>%
+  filter(country_name != "Dominica")
+
+match_regexes <- function(text) {
+  num <- which(text == titles)
+  if(num %% 1000 == 0) {
+    message("On ", num, " of ", length(titles)," ")
+  }
+  
+  has_country_match <- str_detect(text, 
+                                  regex(paste0("\\b",
+                                               demonyms$regex), 
+                                        ignore_case = TRUE, perl = TRUE))
+  has_demonym_match <- str_detect(text, 
+                                  regex(paste0("\\b",
+                                               demonyms$demonym), 
+                                        ignore_case = TRUE, perl = TRUE))
+  country_name <- NA
+  context_match <- NA
+  demonym_match <- NA
+  title <- NA
+
+  if(any(has_country_match)) {
+    country_name <- demonyms$country_name[ which(has_country_match) ]
+    title <- text
+  }
+  
+  if(any(has_demonym_match)) {
+    country_name <- demonyms$country_name[ which(has_demonym_match) ]
+    demonym_match <- demonyms$demonym[ which(has_demonym_match) ]
+    title <- text
+  }
+
+  data_frame(country_name = country_name,
+             demonym_match = demonym_match,
+             title = title)
+    
+  
+}
+
+titles <- processed_corpus %>% 
+  distinct(processed_title) %>% 
+  .$processed_title
+
+country_mentions <- titles %>%
+  map_df(match_regexes) %>%
+  filter(!is.na(title)) 
+
+country_mentions <- left_join(country_mentions, PoliticalDatasets::data %>% select(country_name, lon, lat))
+
+country_mentions <- country_mentions %>%
+  rename(processed_title = title)
+
+devtools::use_data(country_mentions, overwrite = TRUE)
+```

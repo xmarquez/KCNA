@@ -1,0 +1,1322 @@
+---
+title: "Propaganda as Literature: A Distant Reading of the Korean Central News Agency's Headlines"
+output: 
+  html_document: 
+    self_contained: no
+---
+
+```{r setup, include=FALSE}
+library(KCNA)
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(ggrepel)
+library(knitr)
+library(tidytext)
+library(reshape2)
+library(forcats)
+library(wordcloud)
+library(text2vec)
+
+knitr::opts_chunk$set(echo = FALSE,
+                      cache = TRUE,
+                      cache.rebuild = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+theme_set(theme_bw())
+theme_update(legend.position = "bottom")
+```
+
+(Warning: long and exhaustive discussion of propaganda that nobody reads or cares about, by a non-specialist in North Korean politics. Contains complicated interactive graphs best viewed on a laptop or desktop computer). 
+
+I've always been a bit puzzled about the existence of the Korean Central News Agency (KCNA) [website](www.kcna.co.jp/index-e.htm) in Japan. The site is defiantly Web 1.0: no pictures, static HTML, formulaic headlines in English and Spanish that would not have been out of place in a 1950s edition of *Pravda*.[^changes] It's not clickbait, to say the least, and one struggles to imagine that the stories there can actually inform or persuade anyone of anything. 
+
+Moreover, few people who might be plausibly interested can even read the site: it has always been [blocked in South Korea](https://en.wikipedia.org/wiki/Korean_Central_News_Agency), and since sometime in 2015, it also became [inaccessible from outside Japan anyway](http://www.northkoreatech.org/2015/08/09/kcna-japan-site-isnt-down-its-geo-blocked/). If you are actually interested in the North Korean perspective on current affairs, today you'd probably want to visit the [new and spiffier Pyongyang-hosted website of KCNA](http://www.kcna.kp/), or [KCNAWatch](https://www.kcnawatch.co/) if you are a professional NK watcher. 
+
+And though the site may have had a signaling function before the emergence of these other websites, serving as a place where one could be sure of finding the official North Korean view of things, too many of its stories ("Kimilsungia show opens in Indonesia", "floral basket from diplomatic corps", "dancing parties of youth and students held," to choose three headlines at random from the past decade) seem to be about matters of no interest whatsoever [to just about anyone](http://www.alexa.com/siteinfo/kcna.co.jp). Even the site's value for understanding North Korean internal propaganda is dubious: as [B. R. Myers has argued](https://books.google.co.nz/books?id=KWQEAQAAQBAJ), actual North Koreans seem to be exposed to somewhat different propaganda content than that produced for the outside world.    
+
+The entire [Chongryon-hosted](https://en.wikipedia.org/wiki/Chongryon) enterprise thus seems almost completely devoid of informational and propaganda value today, if it ever had any; it is a classic example of "[propaganda without readers](http://abandonedfootnotes.blogspot.com/2015/07/propaganda-as-signaling_76.html)." This lack of strategic or informational value, however, may be useful if we are interested in these headlines as *expressive literature*. From this point of view, we can try to make sense of KCNA stories not as strategic attempts to convince people to support the North Korean regime, or to credibly signal particular commitments to external audiences, but simply as the nearly automatic manifestation of the North Korean state's own commitments to itself. Much KCNA content may therefore be more susceptible to literary than political analysis. 
+
+But. These headlines and stories are **REALLY BORING**. (They are *nothing at all* like reading [\@DPRK_News](https://twitter.com/DPRK_News) on Twitter!) So instead of reading them myself, I thought I'd rather get my computer to read them -- and in the process learn a bit about computer-aided text mining. Thus a couple of years ago, in one of my fitful efforts to learn more `R` programming, I scraped nearly all KCNA headlines from `r stamp("January 1 1997")(min(headlines$date))` to `r stamp("January 1 1997")(max(headlines$date))` (n = `r nrow(headlines)`). (A few dates are missing, mainly in 1997-1998, because my web scraping program was not perfect, but most dates are there). The project gathered dust, but over the past few months I've had some time to do some proper analysis.
+
+So what do we learn from doing a "[distant reading](https://books.google.co.nz/books/about/Distant_Reading.html?id=YKMCy9I3PG4C&redir_esc=y)" of KCNA content? In general, as we shall see, nothing too surprising if you have any acquaintance with North Korea. KCNA turns out to produce mostly a sort of humdrum bureaucratic literature that precisely reflects the hierarchies of North Korean politics and draws extensively on nationalist themes, and where the members of the Kim family play a key role. But some things are surprising, such as the particular ways in which the Kims are actually portrayed and celebrated, or the uniformity of its themes over more than 15 years. 
+
+**WARNING: EXCRUCIATINGLY DETAILED DISCUSSION OF SOME OF THE MOST BORING TEXTS EVER PRODUCED IN THE HISTORY OF THE WORLD FOLLOWS. DON'T SAY I DIDN'T WARN YOU**
+
+```{r extract_mentions}
+
+mentioned <- preprocessed_corpus %>%
+  filter(!is.na(mentioned)) %>%
+  count(mentioned, sort = TRUE) %>%
+  mutate(rank = (max(dense_rank(n)) - dense_rank(n)) + 1,
+         log_rank = log(rank)) %>%
+  left_join(person_categories %>%
+              distinct(mentioned, .keep_all = TRUE) %>%
+              select(-n, -uri) %>%
+              mutate(mentioned = str_replace_all(mentioned,
+                                                 "_"," ") %>%
+                       str_to_title())) %>%
+  mutate(category = fct_reorder(category, rank, fun = min, na.rm =TRUE))
+
+```
+
+## Dramatis Personae: Who does KCNA talk about?
+
+One obvious question to ask of the headlines is simply who are the main *dramatis personae*, and how they are related to one another. I thus first extracted from the headlines all mentions of people with Korean names I could find, and used [the magic of DBpedia](http://wiki.dbpedia.org/) to identify the roles of as many of these as I could. Now, most headlines (~80%) do not mention anyone with a Korean name I can detect, but the obvious people (e.g., Kim Jong Il, Kim Il Sung, and Kim Jong Un) are mentioned far more than anyone else. Indeed, the number of times a person with a Korean name is mentioned over this period (which contains most of the period of Kim Jong Il's rule, from 1997 until his death in 2011) is reasonably well approximated (for the upper tail of the distribution) by [Zipf's law](https://en.wikipedia.org/wiki/Zipf%27s_law), with Kim Jong Il as the most mentioned person, followed by his father and his son:[^details]
+
+```{r frequencies, dependson="extract_mentions", fig.height=8}
+
+ggplot(data = mentioned, aes(y = n, 
+                             x = rank)) + 
+  geom_count(aes(color = category)) + 
+  geom_text_repel(data = mentioned %>% 
+                    filter(log_rank < 3), 
+                  aes(label = paste(mentioned,n,sep=": "),
+                      color = category)) + 
+  scale_y_log10() +
+  scale_x_log10() +
+  geom_smooth(data = mentioned %>% 
+                filter(log_rank < 3.5), 
+              aes(y = n, 
+                  x = rank), 
+              method="lm")+ 
+  labs(y="Number of headlines mentioning person", 
+       x = "Rank", 
+       color = "Main category (from wikipedia)",
+       size = "Number of distinct people \nmentioned a given number of times",
+       title = "Most mentioned Korean personal names in headlines",
+       subtitle = "Log-log plot. Only people with Korean names are captured.") +
+  guides(size = guide_legend(title.position = "top"),
+         color = guide_legend(title.position = "top", ncol = 1)) 
+
+```
+
+The number of mentions also reflects a strict hierarchy: members of the Kim family are the most mentioned, followed by [Kim Yong Nam](https://en.wikipedia.org/wiki/Kim_Yong-nam) (a long-time foreign minister and the nominal head of state between 1998 and 2009 -- no relation to the Kim dynasty), several South Korean presidents ([Lee Myung Bak](https://en.wikipedia.org/wiki/Lee_Myung-bak), [Park Geun Hye](https://en.wikipedia.org/wiki/Park_Geun-hye), and [Kim Young Sam](https://en.wikipedia.org/wiki/Kim_Young-sam)), several North Korean government ministers (e.g., [Pak Ui Chun](https://en.wikipedia.org/wiki/Pak_Ui-chun)), senior figures in the Worker's Party of Korea, and so on, down to more ordinary people. (Some important names that may be unfamiliar: [Kang Pan Sok](https://en.wikipedia.org/wiki/Kang_Pan-sok) was Kim Il Sung's mother; [Kim Hyong Jik](https://en.wikipedia.org/wiki/Kim_Hyong-jik) was his father; and [Kim Jong Suk](https://en.wikipedia.org/wiki/Kim_Jong-suk) was his wife).
+
+We shouldn't take the numbers in this particular picture too seriously; for one thing, as the years pass, Kim Jong Un would have been mentioned much more frequently, and in any case my name detection algorithm is not perfect. Moreover, perhaps mentions of people in news headlines around the world always follow this pattern -- it certainly sounds plausible that the distribution of personal names in news headlines all over the world follows the kind of distribution that is well modeled by power laws of some sort, at least for the upper tail. After all, most people in the world are never mentioned in the news, and a disproportionate share of mentions must go to important public figures. 
+
+But the disparity in mentions between the Kims and almost everyone else is nevertheless striking, one bit of evidence of the "cultic" expressive function of the KCNA headlines. Conversely, among the `r mentioned %>% filter(n == 1) %>% nrow` people with Korean names mentioned only once in the headlines, `r  preprocessed_corpus %>% filter(mentioned %in% mentioned$mentioned[ mentioned$n == 1], grepl("wreath|bier",title)) %>% nrow` are noted in the context of their funeral, when one of the Kims "sends a wreath to the[ir] bier," as the headline formula has it; they are mentioned only in death.
+
+Moreover, the three members of the Kim family also monopolized a very large *proportion* of all KCNA headlines throughout this period. For example, whenever Kim Jong Il was mentioned, he took up, on average, 14% of the headlines for the day. The average number of headlines per day is about 21 (median 19), so he was typically mentioned in the headlines of at least two stories whenever he was mentioned at all (he was mentioned in about 10% of all headlines, if we include the days when he's not mentioned). Similarly, Kim Jong Un took up 13% of the headlines on average on days he was mentioned, and Kim Il Sung another 9%. On average over 10% of all headlines mention at least one of them in this period, with a slightly increasing trend since Kim Jong Il's death. (The proportion of headlines mentioning members of the Kim ruling family on particular days can obviously be much larger; on some days, one or more of them were mentioned in more than half of all headlines). 
+
+Below, the dashed curve shows the smoothed proportion of mentions of the Kim family on all days; the solid curve shows only the proportion on days in which at least one of them is mentioned:
+
+```{r proportion_kim_family, fig.height=8}
+
+mentioned_per_date <- preprocessed_corpus %>% 
+  mutate(mentioned = fct_lump(mentioned, 4),
+         mentioned = plyr::mapvalues(mentioned, 
+                                      from = c("Kim Jong Il",
+                                               "Kim Il Sung",
+                                               "Kim Jong Un",
+                                               "Kim Yong Nam"),
+                                      to = c("Ruling family (3 Kims)",
+                                             "Ruling family (3 Kims)",
+                                             "Ruling family (3 Kims)",
+                                             "Kim Yong Nam (nominal head of state)"))) %>%
+  distinct(date, title, mentioned)  %>%
+  group_by(date) %>%
+  mutate(total_headlines = length(unique(title))) %>%
+  count(date, mentioned, total_headlines) %>%
+  ungroup() %>% 
+  mutate(prop = n/total_headlines,
+         mentioned = fct_relevel(mentioned, "Ruling family (3 Kims)") %>%
+           fct_rev()) %>%
+  group_by(date) %>%
+  mutate(prop_kims = ifelse(!"Ruling family (3 Kims)" %in% mentioned, 
+                            0, prop[ mentioned == "Ruling family (3 Kims)"])) %>%
+  ungroup()
+
+ggplot(data = mentioned_per_date %>% 
+         filter(!is.na(mentioned)), 
+       aes(x = date, 
+           fill = mentioned, 
+           color = mentioned)) +
+  geom_bar(width=1, aes(weight = prop)) +
+  geom_smooth(data = mentioned_per_date %>% 
+                filter(mentioned == "Ruling family (3 Kims)"), 
+              aes(x = date, y = prop), 
+              inherit.aes = FALSE) +
+  geom_smooth(data = mentioned_per_date %>%
+                distinct(date, prop_kims),
+              aes(x = date, y = prop_kims), 
+              inherit.aes = FALSE, 
+              linetype=2) +
+  scale_fill_brewer(type = "qual") +
+  scale_color_brewer(type = "qual") +
+  theme(legend.position = "bottom") +
+  labs(y = "", fill = "", color ="",
+       title = "The Kim Central News Agency",
+       subtitle = "Proportion of headlines mentioning the Kims, per day",
+       caption = str_wrap("Dashed line represents the smoothed proportion of mentions of the Kims on all days (including days when no Kim is mentioned). Solid line represents the smoothed proportion of mentions of the Kims only on days where at least one of them is mentioned.", width = 100) %>% paste(collapse = "\n")) +
+  scale_y_continuous(labels = scales::percent, breaks = c(0,0.125,0.25,0.5,0.75,1)) +
+  guides(fill = guide_legend(title.position = "top"),
+         linetype = guide_legend(title.position = "top")) 
+
+rm(mentioned_per_date)
+```
+
+These proportions seem to me really high. For contrast, in a sample of headlines I gathered a few years ago from the Falangista organ *[Arriba](https://en.wikipedia.org/wiki/Arriba_(newspaper))* during the 1940s, I don't seem to get nearly the same proportion of mentions of Franco, though my sample is biased towards days where Franco is actually mentioned. (But I can't tell for sure yet, since *Arriba* has many different ways of referring to Franco, and I gathered nowhere near every headline for the period). And according to [Jan Plamper's examination](https://books.google.co.nz/books/about/The_Stalin_Cult.html?id=A3d5OBM9pVAC) of *Pravda* from 1929 to 1953, Stalin did not seem to be mentioned or depicted nearly as often as the Kims are mentioned (though Plamper focuses on visual representations rather than mentions). Part of the reason for this disparity may be that both *Pravda* and *Arriba* actually did have to function at least in part as informational and propaganda organs, whereas KCNA operates under no such constraints, and is therefore free to serve purely expressive purposes. (Nobody reads KCNA to be informed of the news, in part because [nobody reads KCNA](http://www.alexa.com/siteinfo/kcna.co.jp), period).
+
+Not only did the Kims monopolize a very large proportion of the headlines, they are also mentioned in very distinctive contexts. Using a technique called [global word vector embeddings](http://nlp.stanford.edu/projects/glove/) -- basically, a way of transforming words into numerical vectors that captures similarities in meaning among them based on their patterns of co-occurrence with other words[^Glove] -- we find that the names of the Kim dynasty are quite "similar" in meaning to one another within the KCNA imaginary (in the sense that their mentions occur in very similar contexts) -- and very "dissimilar" in meaning to the names of just about anyone else. 
+
+In the graph below, I cluster the names of all Korean people mentioned at least 5 times in the corpus according to their degree of "semantic similarity" (see details in the code for this post). This "similarity matrix" defines a graph, where two people are connected to one another if they score at least 0.3 in a metric ranging from -1 (totally dissimilar contexts) to 1 (totally similar contexts). A similarity of 0.8 or above is a good sign the words are basically synonymous in the corpus. (This is actually kind of magical, given that the computer knows nothing about the text save for the pattern of word co-occurrence!). The three Kims (among the dark Green nodes) all share similarities with one another of over 0.6 (though the younger Kim Jong Un is less contextually similar to his grandfather than his father is, partly because both father and grandfather are dead by the time he begins appearing in the headlines): 
+
+```{r gloveEmbeddings}
+
+per_title <- processed_corpus %>%
+  distinct(date, processed_title) %>%
+  mutate(id = seq_along(processed_title))  
+
+tokenizing_function <- function(x) {
+  x <- str_to_lower(x)
+  tokenizers::tokenize_regex(x, pattern ="\\W+")
+}
+
+iter <- itoken(per_title$processed_title, 
+             tokenizer = tokenizing_function, 
+             ids = per_title$id, 
+             progressbar = FALSE)
+
+vocab <- create_vocabulary(iter,
+                           stopwords = tm::stopwords())
+
+vocab <- prune_vocabulary(vocab, term_count_min = 5L)
+
+vectorizer <- vocab_vectorizer(vocab, 
+                               # don't vectorize input
+                               grow_dtm = FALSE, 
+                               # use window of 5 for context words
+                               skip_grams_window = 5L)
+
+tcm <- create_tcm(iter, vectorizer)
+
+glove <- GlobalVectors$new(word_vectors_size = 50, vocabulary = vocab, x_max = 10)
+
+glove$fit(tcm, n_iter = 20)
+
+word_vectors <- glove$get_word_vectors()
+```
+
+```{r peopleRelationships}
+
+counts <- processed_corpus %>%
+  left_join(preprocessed_corpus) %>%
+  distinct(processed_title, mentioned) %>%
+  count(mentioned, sort = TRUE) %>%
+  filter(!is.na(mentioned), n >= 5) %>%
+  mutate(mentioned = str_to_lower(mentioned) %>% str_replace_all(" ","_")) 
+
+
+relationships <- sim2(x =  word_vectors[which(row.names(word_vectors) %in% counts$mentioned), , drop = FALSE],
+                     y =  word_vectors[which(row.names(word_vectors) %in% counts$mentioned), , drop = FALSE],
+                     method = "cosine", norm = "l2")
+
+
+people_graph <- igraph::graph_from_adjacency_matrix(relationships, mode = "undirected", weighted = TRUE, diag = FALSE)
+people_graph_edges <- igraph::as_data_frame(people_graph) 
+people_graph_nodes <- igraph::as_data_frame(people_graph, what = "vertices") 
+people_graph_nodes <- people_graph_nodes %>% 
+  left_join(counts %>% rename(name = mentioned)) %>%
+  left_join(person_categories %>% 
+              distinct(mentioned, .keep_all = TRUE) %>%
+              rename(name = mentioned) %>%
+              select(-n)) %>%
+  mutate(label = str_replace_all(name, "_"," ") %>%
+           str_to_title())
+
+people_graph <- igraph::graph_from_data_frame(people_graph_edges, 
+                                              directed = FALSE, 
+                                              vertices = people_graph_nodes)
+
+people_graph <- igraph::subgraph.edges(people_graph, 
+                                       which(igraph::E(people_graph)$weight > 0.3), 
+                                       delete.vertices = FALSE)
+
+color <- igraph::V(people_graph)$category %>% as.factor()
+
+levels(color) <- RColorBrewer::brewer.pal(length(levels(color)), "Paired")
+igraph::V(people_graph)$color <- as.character(color)
+igraph::V(people_graph)$name <- igraph::V(people_graph)$label
+
+people_graph_nodes <- igraph::as_data_frame(people_graph, what = "vertices") %>%
+  arrange(category) %>%
+  mutate(id = name,
+         value = n,
+         title = paste0(name, 
+                        " (",
+                        category,
+                        ")"))
+
+people_graph_edges <- igraph::as_data_frame(people_graph, what = "edges") %>%
+  mutate(width = weight,
+         title = paste("Similarity: ", round(weight, 2)))
+
+library(visNetwork)
+visNetwork(people_graph_nodes, people_graph_edges, 
+           main = "Contextual similarities among Koreans mentioned in headlines",
+           submain = "Cosine similarities > 0.3 from GloVE embedding (50 dimensions)") %>%
+  visIgraphLayout(layout = "layout_in_circle") %>%
+  visOptions(highlightNearest = list(enabled = TRUE, hover = TRUE), 
+             nodesIdSelection = list(enabled = TRUE))
+
+rm(people_graph, people_graph_edges, 
+   people_graph_nodes, relationships, 
+   color, counts, glove, iter, tcm, vocab,
+   tokenizing_function, vectorizer,
+   per_title, word_vectors)
+
+```
+
+The other thing that jumps out from this graph is the degree to which South Korean presidents appear segregated into two distinct semantic communities: one that has as its members [Lee Myung Bak](https://en.wikipedia.org/wiki/Lee_Myung-bak), [Kim Young Sam](https://en.wikipedia.org/wiki/Kim_Young-sam), and current president [Park Geun Hye](https://en.wikipedia.org/wiki/Park_Geun-hye); and the other comprising [Kim Dae Jung](https://en.wikipedia.org/wiki/Kim_Dae-jung) and [Roh Moo Hyun](https://en.wikipedia.org/wiki/Roh_Moo-hyun). The first community is almost completely disconnected from anyone else, presumably reflecting their particular hardline policies and the consequent hostility of the North to them, while the second is much more tightly linked to various North Korean politicians, presumably reflecting a more positive view of them in view of their more conciliatory policies. (The remaining communities seem reasonable: North Korean politicians are mentioned in contexts similar to one another, as are the remaining members of the Kim dynasty; and Kim Yong Nam appears as a tightly connected node, reflecting his position as long-term Foreign Minister and head of state during much of this period).
+
+## Anger and Reverence: What emotions does KCNA express? 
+
+The overall number of mentions is not always a very good measure of popularity or respect; as we saw above, the fifth most mentioned person in this KCNA corpus (more than 1000 times) is the former South Korean president [Lee Myung Bak](https://en.wikipedia.org/wiki/Lee_Myung-bak), who was not especially beloved in the North given his hard-line policies toward the DPRK. Instead of looking simply at the number of mentions, however, we can look at the picture that emerges when we look at sentiment (positive or negative) in the headlines mentioning particular people over time. To this end, I used the [NRC sentiment lexicon, included in the tidytext R package](https://cran.r-project.org/web/packages/tidytext/index.html).[^sentimentCorrelations] This is not ideal (sentiment dictionaries are not highly context-sensitive, and they can sometimes produce funny results given the vocabulary of KCNA headlines, as we shall see), but the results are still useful as a way to get a broad-brush picture of KCNA's likes and dislikes. 
+
+In the images below, the length of the bars encodes the proportion of all headlines that mention a specific person on a given date, and the color of each bar indicates the degree to which the headlines mentioning them express positive or negative sentiments (redder bars mean more negative sentiment in the set of headlines mentioning that person for that day on average, white means neutral sentiment, blue means more positive sentiment; Spanish-language headlines -- about 20% of the total on any given day -- do not have any sentiment scores assigned to them, and so would add to the grey bars). The vertical dashed line denotes the average proportion of headlines that mention the specific person for the dates where at least one headline mentions them (not as a proportion of all headlines, note!). Local peaks (days where the proportion of mentions of a person in headlines is unusually high) are labeled on the y axis, and a sample headline is shown for these dates: 
+
+```{r sentiment_most_mentioned, fig.height=8, dependson="extract_mentions"}
+
+set.seed(1234)
+
+proportion_per_date <- preprocessed_corpus %>%
+  mutate(mentioned = fct_lump(mentioned, 5)) %>%
+  group_by(date) %>%
+  mutate(total_headlines = length(unique(title))) %>%
+  count(date, mentioned, total_headlines) %>%
+  ungroup() %>%
+  mutate(prop_per_date = n/total_headlines) 
+
+sentiment_per_person_date <- preprocessed_corpus %>%
+  mutate(mentioned = fct_lump(mentioned, 5)) %>%
+  select(date, title, mentioned) %>%
+  unnest_tokens(word, title, drop = FALSE) %>%
+  inner_join(sentiments) %>%
+  filter(sentiment %in% c(NA, "negative", "positive")) %>%
+  mutate(score = ifelse(lexicon == "AFINN", score,
+                        ifelse(sentiment == "negative", -1,
+                               ifelse(sentiment == "positive", 1,
+                               score)))) %>%
+  group_by(date, mentioned, lexicon) %>%
+  summarise(total_score = sum(score),
+            sample_headline = sample(title, 1),
+            words = list(word),
+            word_scores = list(score),
+            titles = list(title)) %>%
+  ungroup() %>%
+  right_join(proportion_per_date) %>%
+  group_by(mentioned) %>%
+  arrange(date) %>%
+  mutate(is_peak = (date %in% date[ findpeaks(prop_per_date, bw = 300)[[1]] ])) %>%
+  ungroup()
+
+sentiment_graph <- function(data) {
+  
+  p <- ggplot() +
+          geom_bar(data = data, 
+                   aes(y = prop_per_date, 
+                       x = date, 
+                       color = total_score, 
+                       fill = total_score), 
+                   stat="identity", show.legend = FALSE) +
+          geom_text_repel(data = data %>% filter(is_peak), 
+                          inherit.aes = FALSE, 
+                          aes(x = date,
+                              y = prop_per_date,
+                              label = sample_headline), 
+                          size=2) +
+          geom_hline(yintercept = mean(data$prop_per_date), linetype=2) +
+          facet_wrap(~mentioned,ncol=1) +
+          scale_x_date(expand=c(0.01,0), breaks = data$date[ data$is_peak ], 
+                     labels = format(data$date[ data$is_peak ], format = "%d %b %Y"), 
+                     limits = c(min(data$date),max(data$date))) +
+          scale_fill_gradient2(guide="legend") +
+          scale_color_gradient2(guide="legend") +
+          labs(y="", x ="") +
+          scale_y_continuous(breaks = c(0,mean(data$prop_per_date),0.25,0.5,0.75,1),
+                             labels=scales::percent, 
+                             limits = c(0,1)) +
+          coord_flip()
+  
+  print(p)
+}
+
+sentiment_per_person_date %>%
+  filter(is.na(lexicon) | lexicon == "nrc") %>%
+  split(.$mentioned) %>%
+  walk(sentiment_graph)
+
+# With a different sentiment lexicon:
+# sentiment_per_person_date %>%
+#   filter(is.na(lexicon) | lexicon == "AFINN") %>%
+#   split(.$mentioned) %>%
+#   walk(sentiment_graph)
+
+
+
+```
+
+Unsurprisingly, the tone of headlines referring to the top members of the NK elite (the Kim family plus [Kim Yong Nam](https://en.wikipedia.org/wiki/Kim_Yong-nam)) is generally positive, except for one red spike of negative emotion on the funeral of Kim Jong Il (20 December 2011), where most headlines mourn his demise. By contrast, Lee Myung Bak stands out in red: almost all mentions of him were clearly negative, as we should expect, while the mentions of other people vary quite a bit (since they include both North Koreans and South Koreans, allies and adversaries).
+
+Because lexicon-based methods of sentiment detection are insensitive to context, it is nevertheless worth checking which words contribute most to positive or negative sentiment in these pictures. We can do this by looking at a comparison word cloud. (I know word clouds are supposed to be bad visualization practice and all, but I'm not looking for exact proportions of words, and these are informative enough for our purposes):
+
+```{r sentiment_most_mentioned_2, dependson="extract_mentions", fig.height = 4, fig.width = 2.5, fig.show = "hold"}
+
+
+library(wordcloud)
+
+wordcloud_data <- sentiment_per_person_date %>%
+  unnest(words, word_scores) %>%
+  mutate(sentiment = ifelse(word_scores > 0, 
+                              "positive",
+                              "negative")) %>%
+  select(-n) %>%
+  count(lexicon, mentioned, sentiment, words, sort = TRUE) %>%
+  ungroup() 
+
+wordcloud_graph <- function(data) {
+
+  data %>%
+    acast(words ~ sentiment, value.var = "n", fill = 0) %>%
+    comparison.cloud(colors = brewer.pal(5, "RdBu")[c(1,5)],
+                     max.words = 100,
+                     #main = title,
+                     title.size = 1) %>%
+    invisible()
+  
+  title(main = unique(data$mentioned))
+
+}
+
+wordcloud_data %>%
+  filter(lexicon == "nrc") %>%
+  mutate(mentioned = fct_infreq(mentioned) %>%
+           fct_relevel("Other", after = 6)) %>%
+  split(.$mentioned) %>%
+  walk(wordcloud_graph)
+
+rm(sentiment_per_person_date, proportion_per_date, wordcloud_data, wordcloud_graph)
+```
+
+Some negative sentiment words are clear mistakes ("vice" in headlines mentioning Kim Yong Nam usually is part of "vice-premier" or a similar construction; "exploit" is typically used to refer to the great deeds of the Kims, not as a verb; "communism" is hardly a negative term in NK official ideology, even though it's not mentioned very often), and some words are dubiously classified ("foreign" does not always have a negative connotation, even in headlines by KCNA - especially if the topic is foreigners bringing gifts!). But the overall picture is reasonable: positive headlines show "praise" and include "gifts" -- denoting mostly a kind of reverence or respect -- while negative headlines "slam" people as "traitors" and "condemn" the "dictatorship" (usually of South Korea), in a key of anger.[^lexiconDifferences]
+
+Similarly, there is nothing too surprising about the tone of headlines that mention the regime's three main adversaries and its one patron: the United States, South Korea, and Japan are mostly presented negatively (though Japan less so than the other two countries, in part because headlines mentioning Japan often have something to do with [Chongryon](https://en.wikipedia.org/wiki/Chongryon), the association of North Korean residents in Japan), while China is mentioned mostly in headlines with positive sentiment. (Some of these countries are mentioned more often than almost any individual person; for example, South Korea is mentioned in about 10% of all headlines, and in 12% of the headlines on dates where it is mentioned at least once):
+
+```{r mentions_adversaries_and_partners, fig.height=8, dependson="extract_mentions"}
+proportion_per_date <- preprocessed_corpus %>% 
+  gather(variable, value, mentions_us:mentions_china) %>%
+  select(-mentioned) %>%
+  rename(mentioned = variable) %>%
+  mutate(mentioned = plyr::mapvalues(mentioned, 
+                                    from = unique(mentioned), 
+                                    to = c("Mentions US",
+                                           "Mentions Japan",
+                                           "Mentions South Korea",
+                                           "Mentions China"))) %>%
+  group_by(date) %>%
+  mutate(total_headlines = length(unique(title))) %>%
+  group_by(date, mentioned, total_headlines) %>%
+  summarise(n = length(mentioned[ value ])) %>%
+  ungroup() %>%
+  mutate(prop_per_date = n/total_headlines) 
+
+adversaries_and_partners <- preprocessed_corpus %>% 
+  reshape2::melt(measure.vars = c("mentions_us",
+                                  "mentions_japan",
+                                  "mentions_south_korea",
+                                  "mentions_china")) %>%
+  filter(value) %>%
+  select(-mentioned, -value) %>%
+  rename(mentioned = variable) %>%
+  mutate(mentioned = plyr::mapvalues(mentioned, 
+                                    from = unique(mentioned), 
+                                    to = c("Mentions US",
+                                           "Mentions Japan",
+                                           "Mentions South Korea",
+                                           "Mentions China"))) %>%
+  select(date, title, mentioned) %>%
+  unnest_tokens(word, title, drop = FALSE) %>%
+  inner_join(sentiments) %>%
+  filter(sentiment %in% c(NA, "negative", "positive")) %>%
+  mutate(score = ifelse(lexicon == "AFINN", score,
+                        ifelse(sentiment == "negative", -1,
+                               ifelse(sentiment == "positive", 1,
+                               score)))) %>%
+  group_by(date, mentioned, lexicon) %>%
+  summarise(total_score = sum(score),
+            sample_headline = sample(title, 1),
+            words = list(word),
+            word_scores = list(score),
+            titles = list(title)) %>%
+  ungroup() %>%
+  right_join(proportion_per_date) %>%
+  group_by(mentioned) %>%
+  arrange(date) %>%
+  mutate(is_peak = (date %in% date[ findpeaks(prop_per_date, bw = 300)[[1]] ])) %>%
+  ungroup()
+
+adversaries_and_partners %>%
+  filter(is.na(lexicon) | lexicon == "nrc") %>%
+  split(.$mentioned) %>%
+  walk(sentiment_graph)
+
+rm(proportion_per_date, adversaries_and_partners, sentiment_graph)
+```
+
+Sentiment in the headlines mentioning South Korea also seems to track known changes in South Korean policy. For example, the "[sunshine policy](https://en.wikipedia.org/wiki/Sunshine_Policy)" from 1998-2007 coincides with a generally greater positive sentiment in headlines involving South Korea (not that there aren't lots of negative headlines, but it's a "bluer" period in the image), but becomes more negative with the election of Lee Myung Bak in 2008. This is to be expected, but it's nice to know that the sentiment lexicon is not giving us totally idiotic results.
+
+The NRC lexicon can also be used to score a text according to whether particular words are associated with one of eight emotions: anger, anticipation, disgust, fear, joy, sadness, surprise, and trust. We can use these scores to construct more detailed "sentiment profiles" for the top people and countries mentioned. In the pictures below, we thus plot the proportion of words classified as belonging to a particular emotion in the lexicon for each date. (This lexicon is limited; for some dates, no words in the headline can be classified as belonging to any particular emotion): 
+
+```{r emotions_summary, dependson="extract_mentions"}
+
+emotions <- preprocessed_corpus %>%
+  mutate(mentioned = fct_lump(mentioned, 5)) %>%
+  select(date, title, mentioned) %>%
+  unnest_tokens(word, title, drop = FALSE) %>%
+  inner_join(get_sentiments("nrc")) %>%
+  filter(!(sentiment %in% c("negative", "positive"))) %>%
+  mutate(sentiment = fct_relevel(sentiment, 
+                                 "joy",
+                                 "trust",
+                                 "anticipation",
+                                 "surprise",
+                                 "sadness",
+                                 "fear",
+                                 "anger",
+                                 "disgust"))
+
+ggplot(data = emotions %>% filter(!is.na(mentioned)), 
+       aes(x = date, fill = sentiment)) + 
+  geom_bar(position = "fill", width = 1) + 
+  labs(y = "Proportion of classified words") +
+  facet_wrap(~mentioned) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(type = "qual", palette = "Paired")
+
+
+emotions_adversaries_and_partners <- preprocessed_corpus %>% 
+  reshape2::melt(measure.vars = c("mentions_us",
+                                  "mentions_japan",
+                                  "mentions_south_korea",
+                                  "mentions_china")) %>%
+  filter(value) %>%
+  select(-mentioned, -value) %>%
+  rename(mentioned = variable) %>%
+  mutate(mentioned = plyr::mapvalues(mentioned, 
+                                    from = unique(mentioned), 
+                                    to = c("Mentions US",
+                                           "Mentions Japan",
+                                           "Mentions South Korea",
+                                           "Mentions China"))) %>%
+  select(date, title, mentioned) %>%
+  unnest_tokens(word, title, drop = FALSE) %>%
+  inner_join(get_sentiments("nrc")) %>%
+  filter(!(sentiment %in% c("negative", "positive"))) %>%
+  mutate(sentiment = fct_relevel(sentiment, 
+                                 "joy",
+                                 "trust",
+                                 "anticipation",
+                                 "surprise",
+                                 "sadness",
+                                 "fear",
+                                 "anger",
+                                 "disgust"))
+
+
+ggplot(data = emotions_adversaries_and_partners, 
+       aes(x = date, fill = sentiment)) + 
+  geom_bar(position = "fill", width = 1) + 
+  labs(y = "Proportion of classified words") +
+  facet_wrap(~mentioned) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(type = "qual", palette = "Paired")
+
+rm(emotions, emotions_adversaries_and_partners)
+```
+
+Though the overall sentiment scores are plausible, these plots suggest that the sentiment classifications for individual emotions are less reliable. According to the NRC lexicon, for example, the dominant emotions over the years for headlines that mention Kim Jong Il are joy and trust (no surprise) and surprise (more surprising, this), and further investigation reveals that most of the headlines coded as having high levels of "surprise" mention Kim Jong Il receiving gifts, or noting the "good fortune" he brought to NK or the planet -- an indication of the perils of automated sentiment coding. (Again, this is more respect or reverence). And headlines mentioning Kim Jong Il that are coded as having some "disgust" content are typically headlines that mention visits to pig farms, socialism (not a disgust term in KCNA!), or sending wreaths to funerals (the latter of which might be better coded as "respect" again). Many words are also (rightly) classified as expressing more than one emotion, though a more contextually sensitive technique might be able to disambiguate them.
+
+Similarly, though the overall emotion profiles for particular countries are plausible (e.g., the disgust coding for mentions of the USA seems pretty accurate -- high-disgust headlines mentioning the USA usually talk about its "hideous terrorism") the scoring of particular emotions (joy and South Korea, for example, which includes lots of mentions of "amnesty") is sometimes puzzling. This is to be expected; one would need to probably use a more powerful method (e.g., supervised ML coding of sentiment, with some form of adjustment to account for the fact that different people and countries are mentioned more or fewer times) to get a more accurate picture of specific emotions in the corpus. 
+
+One interesting point we can see from these graphs (despite their potential inaccuracies) is that some figures and countries have more complex "emotional profiles" than others. The headlines that mention Kim Jong Il, for example, display a wider range of emotion (according to the NRC lexicon) than the headlines mentioning Kim Il Sung or Kim Jong Un, let alone Kim Yong Nam (whose headlines are mostly associated with trust, as he typically appears in them when it's a question of receiving this or that delegation). This is probably not because of more ambiguous attitudes by KCNA to Kim Jong Il, but simply because other people are always mentioned in very narrow contexts (as we shall see below). For example, Kim Il Sung, being dead for most of this period, was mentioned mostly in a context of remembrance, whereas Kim Jong Il is portrayed in a wider set of situations. 
+
+Similarly, South Korea also has a more complex emotion profile than the other countries -- more so than China, for example. Though the dominant emotions are often negative, there's a fair amount of positive emotion as well, especially when South Korean organizations are presented as praising North Korea or doing things the regime approves. There is nothing necessarily surprising about this, to be sure, as the North-South relationship is intrinsically complex, including civil society groups in South Korea that are sometimes friendly to the North's aims.
+
+## Cult calendars: what days are special for KCNA?
+
+Leader cults have calendars. Mentions of the leader are not uniformly distributed, but peak at particular days in with special significance. We can automatically identify these days by looking at the days where the proportion of mentions of each member of the Kim family is unusually high:
+
+```{r cult_calendar, fig.height=10, dependson="extract_mentions"}
+
+cult_calendar <- preprocessed_corpus %>% 
+  mutate(date_no_year = paste(month(date, label=TRUE), day(date)), 
+         yday = yday(date) ) %>%
+  group_by(date_no_year) %>%
+  mutate(total = n()) %>%
+  filter(mentioned %in% c("Kim Jong Il","Kim Il Sung","Kim Jong Un")) %>%
+  group_by(date_no_year,mentioned,total) %>%
+  summarise(yday = floor(mean(yday)), 
+            mentions_per_date = n(),
+            prop_per_date = mean(mentions_per_date/total), 
+            sample_headline = sample(title,1), 
+            sentiment = sum(nrc, na.rm = TRUE)) %>%
+  arrange(mentioned,desc(prop_per_date))
+
+calendar_graph <- function(person) {
+  calendar <- cult_calendar %>%
+    filter(mentioned == person) %>%
+    arrange(yday,date_no_year)  
+  
+  calendar <- calendar %>%
+    mutate(is_peak = (date_no_year %in% 
+                        calendar$date_no_year[ findpeaks(calendar$prop_per_date, bw = 20)[[1]] ]))
+  
+  print(ggplot() +
+          geom_bar(data = calendar, 
+                   aes(y = prop_per_date, 
+                       x = yday, 
+                       color = sentiment, 
+                       fill = sentiment), 
+                   stat = "identity", show.legend = FALSE) +
+          geom_text_repel(data = calendar %>% filter(is_peak), 
+                          inherit.aes = FALSE, 
+                          aes(x=yday,
+                              y = prop_per_date,
+                              label = sample_headline), 
+                          size=2) +
+          facet_wrap(~mentioned) +
+          labs(y = "Proportion of all headlines\nmentioning person on date", x="") +
+          scale_x_continuous(breaks = calendar$yday[ calendar$is_peak  ], 
+                             labels = calendar$date_no_year[ calendar$is_peak ])  +
+          scale_y_continuous(labels = scales::percent) +
+          scale_fill_gradient2(guide="legend") +
+          scale_color_gradient2(guide="legend") +
+          coord_flip()) 
+    
+}
+
+list("Kim Jong Il","Kim Il Sung","Kim Jong Un") %>%
+  walk(calendar_graph)
+
+
+```
+
+For [Kim Jong Il](https://en.wikipedia.org/wiki/Kim_Jong-il), the main cult days indicated by KCNA are the days following his death (20 December -- he died on 17 December), the anniversary of the Worker's Party of Korea (celebrated 10 October), the anniversary of the founding of the DPRK (9 September), 16 April (the day after the birthday of [Kim Il Sung](https://en.wikipedia.org/wiki/Kim_Il-sung)), 16 February (his own birthday), and the day after New Year's day (2 January), when the New Year's address is discussed. Similarly, for [Kim Il Sung](https://en.wikipedia.org/wiki/Kim_Il-sung) peak cult days are his birthday (15 April), the days surrounding his death (July 8; mentions peak on the 10th), and the day following the proclamation of the DPRK, which is also the day in which he first assumed office as president (mentions peak on 10th September rather than the 9th). 
+
+For [Kim Jong un](https://en.wikipedia.org/wiki/Kim_Jong-un), interestingly, peak mentions do not appear to include his birthday (8 January, [according to Wikipedia](https://en.wikipedia.org/wiki/Kim_Jong-un)), though they do include the other traditional days: the New Year, the anniversary of the Worker's Party, his father and grandfather's birthdays, and the days around the anniversary of the DPRK (though his mentions peak on the 12th instead of the 9th). Interestingly, only Kim Jong Un is disproportionately mentioned around the "Day of Victory in the Great Fatherland Liberation War" (end of the Korean War, 27 July, though mentions peak on the 26th). The fact that Kim Jong Un's peak mentions are subtly different from those of his father and grandfather -- including an increasing association with the end of the Korean War, which ended before his birth, and the downplaying of his birthday -- seems significant: KCNA does not want to emphasize that the grandson was not born in the heroic time of the founding of the DPRK, but it does want to associate him with its victorious birth, like his grandfather.
+
+Many but not all of these peak mention dates are official [North Korean holidays](https://en.wikipedia.org/wiki/Public_holidays_in_North_Korea). For example, death anniversaries of Kim Il Sung and Kim Jong Il, despite their high "cultic" content (lots of mentions in KCNA) are not, apparently, official holidays (as far as Wikipedia knows, at least). And peak mentions of one of the Kims sometimes occur after the event being commemorated. For example, mentions relating to Kim Jong Il's death peak on the 20th of December (the day of his funeral), rather than on the 17th (when he actually died), while peak mentions of Kim Jong Un in September occur on the 12th rather than on the 9th, when KCNA typically reports that he receives congratulations by world leaders on the occasion of the DPRK's anniversary. 
+
+Mentions of the Kims on "cult days" are distinctive in a couple of other ways. In particular, "cult days" use different formulae to refer to the Kims. We can see this by trying to identify the "distinctive" words used on cult vs. non-cult days. In the charts below, we consider the [term frequency/inverse document frequency](http://juliasilge.com/blog/Term-Frequency-tf-idf/) of words in headlines (a measure of the distinctiveness of words in documents) for the headlines mentioning the three ruling Kims (taking all headlines in cult days for each figure as a "document"), and separating the mentions according to whether they fall on special "cult calendar" days:
+
+```{r cult_days, fig.height = 4, fig.width = 2.5, fig.show = "hold"}
+
+short_cult_calendar <- cult_calendar %>%
+  group_by(mentioned) %>%
+  top_n(10, wt = prop_per_date) %>%
+  select(-sentiment)
+
+cult_words <- processed_corpus %>%
+  left_join(preprocessed_corpus) %>%
+  filter(grepl("NN|VB|TO|JJ|^RB|POS|WRB", tags), 
+         mentioned %in% c("Kim Jong Il", 
+                          "Kim Il Sung",
+                          "Kim Jong Un")) %>%
+  mutate(date_no_year = paste(month(date,label=TRUE), 
+                              day(date))) %>% 
+  left_join(short_cult_calendar) %>%
+  mutate(cult_day = !is.na(yday)) %>% 
+  count(mentioned, cult_day, words, sort= TRUE) %>%
+  ungroup() %>%
+  mutate(cult_day = plyr::mapvalues(cult_day, 
+                                    c(TRUE,FALSE), 
+                                    c("Cult days","Other days")),
+         cult_day_person = paste(cult_day,mentioned)) %>%
+  bind_tf_idf(words, cult_day_person, n) 
+
+wordcloud_graph <- function(data) {
+
+  data %>%
+    acast(words ~ cult_day, value.var = "tf_idf", fill = 0) %>%
+    comparison.cloud(colors = brewer.pal(5, "RdBu")[c(1,5)],
+                     max.words = 100,
+                     title.size = 1) %>%
+    invisible()
+  
+  title(main = unique(data$mentioned))
+
+}
+
+cult_words %>%
+  split(.$mentioned) %>%
+  walk(wordcloud_graph)
+
+    
+rm(cult_words, cult_calendar, short_cult_calendar, wordcloud_graph, calendar_graph, mentioned)
+```
+
+(Distinctive words by tf-idf value, on cult vs. non-cult days. Size indicates tf-idf value, not count.)
+
+On cult days, the Kims are "commemorated" and "congratulated," and given gifts by foreign leaders, while the headlines emphasize tribute paid to the statues of the two elder Kims. (By looking at a sample of headlines that mention these tributes, we can see that they often consist of making "floral offerings" -- of [Kimilsungia](https://en.wikipedia.org/wiki/Kimilsungia) or [Kimjongilia](https://en.wikipedia.org/wiki/Kimjongilia) flowers, presumably -- in front of the statues). By contrast, on non-cult days the headlines emphasize the activities of the Kims. We might say that they are more passive on cult days, and more active in other days, though the differences are not always sharp.  
+
+## Ceremonial Language: How does KCNA speak about the Kims?
+
+A quick glance at the KCNA headlines suggests that, while alive, the leader inspects, surveys, and gives guidance; and is in turn praised and honored, and remembered when dead. Reports of foreigners praising the Kims, giving them gifts, and publishing their work, are especially common. A cool way of visualizing these patterns is to use [Sankey Diagrams](https://en.wikipedia.org/wiki/Sankey_diagram), which reveal the main text flows around mentions of the Kims in the headlines (and look like medusa heads or river deltas to boot; [more data art](http://abandonedfootnotes.blogspot.co.nz/search/label/data%20art)!). These diagrams may be understood as graphical summaries of [concordances](https://en.wikipedia.org/wiki/Concordance_(publishing)), a common way of examining and comparing word contexts in a text corpus. 
+
+Here I show the flows around the top 15 words before and after mentions of each of the Kims (and up to four words of context on each side): 
+
+```{r kim_jong_il_verbs}
+
+titles <- processed_corpus %>%
+  distinct(date, processed_title)
+
+create_sankey_network(titles$processed_title, "Kim_Il_Sung", title = "Flow of text after mentions of Kim Il Sung")
+create_sankey_network(titles$processed_title, "Kim_Il_Sung", "before", title = "Flow of text before mentions of Kim Il Sung")
+
+create_sankey_network(titles$processed_title, "Kim_Jong_Il", title = "Flow of text after mentions of Kim Jong Il")
+create_sankey_network(titles$processed_title, "Kim_Jong_Il", "before", title = "Flow of text before mentions of Kim Jong Il")
+
+create_sankey_network(titles$processed_title, "Kim_Jong_Un", title = "Flow of text after mentions of Kim Jong Un")
+create_sankey_network(titles$processed_title, "Kim_Jong_Un", "before", title = "Flow of text before mentions of Kim Jong Un")
+```
+
+And here's Lee Myung Bak for comparison:
+
+```{r lee_myung_bak }
+create_sankey_network(titles$processed_title, "Lee_Myung_Bak", title = "Flow of text after mentions of Lee Myung Bak")
+create_sankey_network(titles$processed_title, "Lee_Myung_Bak", "before", title = "Flow of text before mentions of Lee Myung Bak")
+
+```
+
+Here's how to read these interactive diagrams. If you hover over a node (say, Kim Jong Il), it shows the number of mentions of that particular word in the english-language headlines (7,969 times in this case). Of these 7,969 mentions, 2,913 times the following word is "s" -- as in "Kim Jong Il's" -- as we learn from hovering over the path between the two nodes -- and more than 1,000 of these mentions are in turn followed by "work" (as we learn from hovering over the path between the "s" node and the "work" node). So the headlines mentioning Kim Jong Il -- already a good 8% of the total -- spend more than 1/8th of the time noting something about his work, in particular that it was published or posted in different countries, or praised by different foreign organizations or individuals, judging from the following nodes in the diagram. (Nodes with the label "..." just collapse many terms together that do not occur sufficiently frequently, so each "column" in the diagram only has 15 nodes).[^more]
+
+Thus, according to KCNA, Kim Jong Il spent a considerable amount of time inspecting KPA units (577 headlines!), sending wreaths to biers (181 headlines), enjoying performances and other artistic endeavours (216 headlines), and giving field guidance (over 200 headlines!). And the son follows in his footsteps, if perhaps with a less single-minded focus on the KPA (possibly a sign of changing priorities away from the "military first" policy of Kim Jong Il?). 
+
+The grandfather, being dead, is primarily praised, remembered, and commemorated; his works are published, and floral baskets or tributes are laid at his statues on his birthday (probably containing [this flower](https://en.wikipedia.org/wiki/Kimilsungia)). When he is referred to by a title, he is simply called "president" (just as his son is usually referred to as "secretary" and very rarely "general"). By contrast, an opponent, like Lee Myung Back (or George W. Bush), is denounced, censured, accused and otherwise struggled against, primarily by North Korean media and people in South Korea. With slight variations here and there, each of these "types" of headline are essentially uniform: "Kim Jong Il inspects KPA unit X" is repeated literally 200 times in the corpus of English-language headlines, for example. 
+
+There is thus a remarkable consistency to these headlines; it is not unfair to call them "formulaic." We might think here of a kind of ceremonial language, single-mindedly reiterated for over 15 years, and painting an unvarying picture of the Kim's activities and honours. (Indeed, if you take a random sample of headlines mentioning the Kims, it is usually not possible to know when any given headline was written -- such is the degree of uniformity). 
+
+One striking pattern that emerges from these graphs is that the Kims rarely "order" anyone to do anything. The picture provided by the headlines is of kindly guidance and filial duty, not of command. Though they teach or inspect various establishments, they never simply assert their dominance; and though they receive many gifts (see below), a substantial proportion of their activity, according to KCNA, consists in sending wreaths to the biers of the illustrious dead, or gifts to elder people (a couple of headlines mention gifts to centenarians). 
+
+All the aggressive vocabulary we might associate with NK propaganda -- slamming, flaying, denouncing, urging, or otherwise attacking enemies -- is missing from headlines that mention the Kims, being associated instead with the media organs of the DPRK, such as the newspaper [*Rodong Sinmun*](https://en.wikipedia.org/wiki/Rodong_Sinmun) or [Minju Joson](https://en.wikipedia.org/wiki/Minju_Choson):  
+
+
+```{r newspapers }
+create_sankey_network(titles$processed_title, "[Rr]odong.[Ss]inmun|[Mm]inju.[Jj]os(e|o)n", title = "Flow of text after mentions of Rodong Sinmun or Minju Joson")
+
+```
+
+The Kims thus stand above the fray, while the abstract organs of the state and party engage in combat against ideological enemies. Perhaps this is in accord with [B. R. Myers' thesis](https://books.google.co.nz/books?id=KWQEAQAAQBAJ) that NK propaganda tends to depict the Kims as more "motherly" than "fatherly" figures. But in any case one might also detect a hint of a broad "Confucian" cultural background here, if I may generalize; there is a great deal of filial piety (both to and from the Kims) in some of these headlines, and they do refer to the leader occasionally as "fatherly" (and to the party as "motherly" -- I won't show you the graph here, but it appears at least 3 times).
+
+Another aspect of the language through which the Kims are depicted is the extreme focus on their receipt of gifts and tribute from around the world. Indeed, I count 762 english-language headlines that mention "gifts" to the Kims from identifiable foreign countries, most from North Korea's near abroad and allies -- China and Russia most of all, but also Mongolia, Japan, and Iran (and 14 gifts from the USA!): 
+
+```{r gifts, fig.height = 6}
+
+gifts <- processed_corpus %>%
+  left_join(preprocessed_corpus) %>%
+  left_join(country_mentions) %>%
+  group_by(country_name) %>%
+  mutate(avg_sentiment = mean(AFINN, na.rm = TRUE),
+         sum_sentiment = sum(AFINN, na.rm =TRUE)) %>%
+  group_by(processed_title) %>%
+  filter(any(words %in% c("Kim Jong Il",
+                          "Kim Il Sung",
+                          "Kim Jong Un")),
+         any(words %in% c("gift","gifts"))) %>%
+  ungroup() %>%
+  distinct(date, processed_title, country_name, demonym_match, avg_sentiment, sum_sentiment, lon, lat) %>%
+  mutate(lat_to = 40.33985, lon_to = 127.5101) 
+
+to_gifts <- gifts %>% select(processed_title) %>%
+  mutate(split = str_replace(processed_title, "(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un|.+)(send[s]?|present[s]?|prepare[s]?|give[s]?).{1,2}gifts? (to|for)(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un|.+)",
+                       "\\1;\\4")) %>%
+  filter(grepl(";", split)) %>%
+  separate(split, into = c("from", "to"), sep = " ; ") %>%
+  filter(!is.na(to))
+
+from_gifts <- gifts %>% select(processed_title) %>%
+  mutate(split = str_replace_all(processed_title, "gift[s]?.+(t?o|for).+(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un).(from|\\bby)(.+)",
+                       "\\4;\\2")) %>%
+  filter(grepl(";", split)) %>%
+  separate(split, into = c("from", "to"), sep = ";") %>%
+  mutate(from = str_replace(from, "^.+  ",""))
+
+from_gifts_2 <- gifts %>% select(processed_title) %>%
+  mutate(split = str_replace_all(processed_title, "^.*(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un).(receives|presented with).+gift[s]?.+(from|by)(.+Kim_Jong_Il|.+Kim_Il_Sung|.+Kim_Jong_Un|.+)",
+                       "\\4;\\1")) %>%
+  filter(grepl(";", split)) %>%
+  separate(split, into = c("from", "to"), sep = ";") 
+
+unknown_sender <- gifts %>% select(processed_title) %>%
+  mutate(split = str_replace_all(processed_title, regex("(?<!sends)(?<!presents)(?<!prepares)(?<!prepare).gift[s]?.+(t?o|for).+(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un)(?!.+from)", perl = TRUE),
+                       "Unknown;\\2")) %>%
+  filter(grepl(";", split)) %>%
+  separate(split, into = c("from", "to"), sep = ";") %>%
+  mutate(from = str_extract(from, "Unknown"),
+         to = str_extract(to, "\\w+")) 
+
+unknown_sender_2 <- gifts %>% select(processed_title) %>%
+  mutate(split = str_replace_all(processed_title, regex("^gift[s]?(?! from).+(t?o|for).+(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un)(?!.+from)(?!.+by)", perl = TRUE),
+                       "Unknown;\\2")) %>%
+  filter(grepl(";", split)) %>%
+  separate(split, into = c("from", "to"), sep = ";") %>%
+  mutate(from = str_extract(from, "Unknown"),
+         to = str_extract(to, "\\w+"))
+
+unknown_sender_3 <- gifts %>% select(processed_title) %>%
+  mutate(split = str_replace_all(processed_title, "^.*(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un).(receives|presented with).+gift[s]?(?!.+from)(?!.+by)",
+                       "Unknown;\\1")) %>%
+  filter(grepl(";", split)) %>%
+  separate(split, into = c("from", "to"), sep = ";") 
+
+unknown_dest <- gifts %>% select(processed_title) %>%
+  mutate(split = str_replace_all(processed_title, regex("(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un|.+).sends.gift[s]?$", perl = TRUE),
+                       "\\1;Unknown")) %>%
+  filter(grepl(";", split)) %>%
+  separate(split, into = c("from", "to"), sep = ";") %>%
+  mutate(to = str_extract(to, "Unknown"))
+
+other_gifts <- gifts %>% select(processed_title) %>%
+   mutate(split = str_replace_all(processed_title, regex("(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un)'s.gift[s]?.+(conveyed to )(.+)", perl = TRUE),
+                       "\\1;\\3")) %>%
+  filter(grepl(";", split)) %>%
+  separate(split, into = c("from", "to"), sep = ";") 
+
+other_gifts_2 <- gifts %>% select(processed_title) %>%
+   mutate(split = str_replace_all(processed_title, regex("gifts?.from.(Kim_Jong_Il|Kim_Il_Sung|Kim_Jong_Un).+(to |for )(.+)", perl = TRUE),
+                       "\\1;\\3")) %>%
+  filter(grepl(";", split)) %>%
+  separate(split, into = c("from", "to"), sep = ";") 
+
+gift_flow <- bind_rows(to_gifts, 
+                         from_gifts, 
+                         from_gifts_2, 
+                         unknown_sender, 
+                         unknown_sender_2, 
+                         unknown_sender_3, 
+                         unknown_dest, 
+                         other_gifts, 
+                         other_gifts_2)
+
+gift_flow <- gift_flow %>%
+  mutate(to = str_replace(to, "secretary Kim_Jong_Il", "Kim_Jong_Il"),
+         to = str_replace(to, "general Kim_Jong_Il", "Kim_Jong_Il"),
+         from = str_replace(from, "secretary Kim_Jong_Il", "Kim_Jong_Il"),
+         from = str_replace(from, "general Kim_Jong_Il", "Kim_Jong_Il"),
+         to = str_replace(to, " ruz$", ""),
+         from = str_replace(from, " ruz$", "")) 
+
+gift_flow <- left_join(gift_flow, gifts) %>% 
+  distinct() 
+
+library(rworldmap)
+
+world <- AuthoritarianismBook::world %>%
+  filter(id != "Antarctica")
+
+data <- gift_flow %>% 
+  filter(to %in% c("Kim_Jong_Il","Kim_Il_Sung","Kim_Jong_Un")) %>%
+  group_by(country_name) %>%
+  mutate(num_gifts = n()) %>%
+  ungroup()
+
+ggplot() + 
+  geom_map(aes(fill = avg_sentiment, map_id = country_name), map = world, 
+           data = data) +
+  geom_path(data = world, aes(y = lat, x = long, group = group)) +
+  geom_count(data = data, aes(lon, lat), 
+             color = "grey20", show.legend = FALSE, position ="jitter") +
+  geom_count(data = data, aes(lon_to, lat_to), 
+             color = "blue", show.legend = FALSE, position ="jitter") +
+  geom_text(data = data %>% 
+              count(country_name, lon, lat), 
+            aes(lon, lat, label = paste0(country_name, " (", n, ")")),
+            size = 2, color = "grey20", alpha = 0.9, nudge_y = 2, 
+            check_overlap = TRUE) +
+  geom_text(data = data %>%
+              count(lon_to, lat_to), 
+            aes(lon_to, lat_to, label = paste0("Total: ", n)),
+            size = 2, color = "grey20", alpha = 0.9, nudge_y = 2, 
+            check_overlap = TRUE) +
+  scale_fill_gradient2() +
+  scale_x_continuous(breaks = seq(-180, 180, 30)) +
+  scale_y_continuous(breaks = seq(-90, 90, 15)) +
+  theme(panel.grid.major = element_line(size = 0.5, linetype = 2),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.border = element_rect(color = NA)) +
+  labs(title = "Provenance of gifts to the Kims",
+       fill = "Average sentiment score\nfor country mentions in headlines",
+       caption = str_wrap("Country sentiment score is calculated for all mentions of the country, 
+       including those where the headline does not mention gifts to the Kims.
+       Redder countries are mentioned in headlines with more negative sentiment.
+       Iran appears reddish because it is typically mentioned in headlines
+       denouncing the West's treatment of the DPRK.", width = 100) %>% paste(collapse ="\n")) +
+  guides(fill = guide_legend(title.position = "top"))
+
+
+```
+
+Many headlines also report gifts to the Kims from unknown persons, or without explicitly mentioning a country of origin (the plain headline "gifts to Kim Jong Il" appears literally 30 times). All these mentions of gifts are strictly prosaic; they constitute a catalog, devoid of literary embellishment, not an occasion for poetry. Occasionally a gift may be described ("a lacquered vase", "a crystal-made flower basket", "a woolen carpet" - the gifts themselves are not very special), but the main point of the headline is to record that a gift was made, not what it was.
+
+The overall picture produced is thus one in which the North Korean ruler, rather than being a client of China or Russia (as reality suggests), appears as a sort of benevolent overlord, receiving their tribute and rarely sending anything back. Indeed, the flow of gifts is always primarily to the Kims, not from them; while 981 headlines mention gifts *to* Kim Jong Il, only 34 mention gifts *from* Kim Jong Il, most of these to Chinese people or other communist leaders (of which 3 went to Fidel Castro, the most of any individual leader recorded here!): 
+
+```{r gifts_flow}
+
+create_vertex_list <- function(edge_list) {
+  vertex_list <- edge_list %>% 
+    count(from, wt = weight) %>%
+    rename(name = from)
+  
+  vertex_list2 <- edge_list %>% 
+    count(to, wt = weight) %>%
+    rename(name = to)
+  
+  vertex_list <- bind_rows(vertex_list, 
+                           vertex_list2) %>% 
+    count(name, wt = n) %>%
+    rename(n = nn) %>%
+    mutate(label = name) %>%
+    ungroup() %>%
+    distinct()
+  
+}
+
+from_country <- gift_flow %>%
+  filter(!is.na(country_name), !grepl("_", from)) %>%
+  mutate(from = country_name)
+
+to_country <- gift_flow %>% 
+  filter(!is.na(country_name), !grepl("_", to)) 
+
+no_country <- gift_flow %>%
+  filter(is.na(country_name)) %>%
+  mutate(from = fct_lump(from, 10),
+         to = fct_lump(to, 10))
+
+gift_flow_2 <- bind_rows(from_country, to_country, no_country) %>%
+  mutate(from = str_replace_all(from, "_", " ") %>%
+           str_trim(),
+         to = str_replace_all(to, "_", " ") %>%
+           str_trim())
+
+gifts_to_kims <- gift_flow_2 %>%
+  filter(to %in% c("Kim Jong Il", "Kim Jong Un", "Kim Il Sung")) %>%
+  mutate(from = fct_lump(from, 30)) %>%
+  count(from, to, sort = TRUE) %>%
+  rename(weight = n)
+
+gifts_from_kims <- gift_flow_2 %>%
+  filter(!to %in% c("Kim Jong Il", "Kim Jong Un", "Kim Il Sung")) %>%
+  mutate(to = fct_lump(to, 35, ties = "first"),
+         to = paste(" ", to)) %>%
+  count(from, to, sort = TRUE) %>%
+  rename(weight = n) 
+
+kim_gift_flow <- bind_rows(gifts_to_kims, gifts_from_kims)
+
+vertex_list <- create_vertex_list(kim_gift_flow)
+
+
+vertex_list <- vertex_list %>%
+    mutate(id = seq_along(name) - 1) %>%
+    select(id, name, label)
+
+edge_list <- kim_gift_flow %>%
+    mutate(source = vertex_list$id[match(from, vertex_list$name)],
+           target = vertex_list$id[match(to, vertex_list$name)],
+           value = weight) %>%
+    select(source, target, from, to, weight)
+
+gift_flow_list <- list(links = edge_list, nodes = vertex_list)
+
+library(networkD3)
+htmlwidgets::prependContent(sankeyNetwork(Links = gift_flow_list$links, 
+              Nodes = gift_flow_list$nodes, 
+              Source = "source", 
+              Target = "target", 
+              NodeID = "label", 
+              Value = "weight", 
+              units = "gifts", 
+              fontSize = 12, nodeWidth = 30), htmltools::HTML(paste0("<center>",
+                                                       "Flow of gifts to and from the Kims",
+                                                       "</center>"))) 
+
+rm(from_country, from_gifts, from_gifts_2, gift_flow_2, gifts, 
+   gifts_from_kims, gifts_to_kims, kim_gift_flow, no_country, 
+   other_gifts, other_gifts_2, to_country, to_gifts, unknown_dest, 
+   unknown_sender, unknown_sender_2, unknown_sender_3, world, gift_flow_list, 
+   gift_flow, mentioned, vertex_list, edge_list, data, create_vertex_list,
+   titles)
+```
+
+Note that these figures underestimate the actual number of gifts received by the Kims, since they only count headlines that mention the words "gift" or "gifts". Many headlines speak directly of tribute or describe a particular gift -- typically a floral basket or a congratulatory letter -- without using the word gift. Including these would just about double the total number of "tributes" reported in the headlines. 
+
+Incidentally, the recording of gifts is in keeping with the general tendency of KCNA *not* to report easily falsifiable facts (cf. [Tom Pepinsky on this point](https://tompepinsky.com/2017/01/23/dictators-use-the-media-differently-than-narcissists-and-bullies/)). The point of the headlines and stories is not to obviously deceive (the gifts, after all, are stored in the [International Friendship Exhibition hall](https://en.wikipedia.org/wiki/International_Friendship_Exhibition)), but to paint a particular picture of the leader receiving tribute from powerful people and organizations. 
+
+The problem is that, though this picture may produce some effects among people who do not have access to any alternative information sources (as [the wiki page about the International Friendship Exhibition suggests](https://en.wikipedia.org/wiki/International_Friendship_Exhibition), without much evidence), it would seem to be totally ineffective when we think of the likely readership of KCNA. The propaganda apparatus here seems to be automatically producing content, or simply echoing the more important internal propaganda, rather than carefully thinking about how to produce an effect on external audiences. It is a of "ceremonial" propaganda, in which the state flatters itself without regards to external audiences, rather than a more clearly instrumental enterprise directed to shaping the views of others.
+
+## The Uniformity of Propaganda
+
+The ceremonial character of KCNA's propaganda is also evident in its remarkable uniformity. One indication of this is the difficulty one has in guessing the time period in which a randomly selected headline was written, unless they explicitly mention a particular person or event that can be identified as a historical anchor;[^model] the headlines are fractally similar in every period, we might say. And while it's of course possible to slice and dice them in many different ways, my best guess is that the headlines typically fall into only about 8-10 topics, which recur in relatively constant proportions and with generally similar vocabulary year after year, with some fluctuations in response to events or great cult holy days. 
+
+First, there is an "achievements of the Kims" topic, where the work, feats, and ideas of the Kims are celebrated, especially by foreigners (e.g., "Kim Jong Il's work off the press in Nicaragua", "Kim Il Sung's Idea of Great National Unity Lauded"). Second, there is a "tribute and honour" topic, where they are shown receiving gifts or granting gifts or honours to others ("Wreath from Guinean president", "Representatives of CCP Mourn Demise of Kim Jong Il"). Here we find the many headlines noting gifts and floral tributes, or the similarly numerous ones depicting the Kims sending wreaths to the biers of the illustrious dead of the nation. Third, there is an "economic and social achievements of the nation" topic, where the headlines report on the progressive economic and social development of the DPRK, and show the Kims providing guidance to factories or other enterprises ("Kim Jong Il Visits Wonsan Youth Power Station"); and fourth, a "cultural and artistic achievements of the nation," which notes artistic performances, sports events, and the like, and sometimes associates them with the leader ("DPRK Judokas Prove Successful at Military Judo Championship", "Secy. Kim Jong Il enjoys performance of choir"). 
+
+The fifth and sixth topics depict the diplomatic activities of the DPRK's political elites ("FM Kim Yong Nam meets Pakistani ambassador") and encourage reunification ("Rodong Sinmun Demands End to Separatist Moves of S. Korean Authorities"). The seventh stresses international solidarity with North Korea, and in turn puts a positive light on adversaries of the Americans (e.g., Iran, the PLO). The eight and ninth focus on criticism of South Korean ("S. Korean Authorities Hit for Violating Workers' Vital Rights", "Explosive unemployment in S. Korea") and American ("American-style "Globalization" Bound to Go Bust - Commentary on International Situation") society and politics (including military moves by the US or South Korea). Sometimes one can find headlines that stress natural disasters around the world, but especially in countries that are perceived to be North Korea's adversaries ("Continuous Earthquakes in Japan"); these may fall into a different topic; and there are many headlines that are about celebrations and anniversaries of important parts of Korean history.
+
+Note what's missing here: communism and socialism, and the associated rhetoric. The vocabulary of Marxism is not wholly absent from KCNA -- socialism is mentioned in about 100 english-language headlines, often in connection with the "Juche" idea and national identity; Marx and marxism are mentioned 4 times; Lenin and leninism 6; and there's the occasional mention of the bourgeoisie and the proletariat. And of course the headlines cannot avoid speaking of workers -- after all, the ruling party is the Worker's Party of Korea, and the word "worker" does appear several hundred times, mostly in connection with critiques of South Korea. But national terms predominate; and of the classical Leninist terminology, the only term that seems to get a lot of use is "imperialism" (and its cognates). Once again, B. R. Myers is right; North Korean ideological constructions are not particularly Marxist in orientation, instead focusing on nationalistic themes. (Indeed, one might argue that most of the communist revolutions of the 20th century -- Vietnam, China, etc. -- except for the Russian one, were ultimately national in orientation; but that's a story for a different day, or person).
+
+We can visualize the uniformity of KCNA's content with a [topic model](https://en.wikipedia.org/wiki/Topic_model). After trying many different things, I find that using about 10 topics gives reasonable results when fitted either to the headlines only or to the stories in a given year (I was also able to scrape most KCNA stories from 2011), though fewer can work fine too - the topics do tend to clump into about 3-4 broadly similar clusters. Here's what the topic proportions look like per year, with a 10 topic model fitted to the headlines (with each "document" the headlines for the entire year):
+
+```{r uniformityPerYear, results='hide'}
+
+set.seed(1234)
+
+tokenizing_function <- function(x) {
+  x <- str_to_lower(x)
+  tokenizers::tokenize_regex(x, pattern ="\\W+")
+}
+
+year_id <- processed_corpus %>%
+  distinct(date, processed_title) %>%
+  mutate(id = year(date))
+
+iter <- itoken(year_id$processed_title, 
+             tokenizer = tokenizing_function, 
+             ids = year_id$id, 
+             progressbar = FALSE)
+
+vocab <- create_vocabulary(iter,
+                           stopwords = tm::stopwords()) %>%
+  prune_vocabulary(term_count_min = 3)
+
+vectorizer <- vocab_vectorizer(vocab, 
+                               skip_grams_window = 5L)
+
+dtm <- create_dtm(iter, vectorizer, type = "lda_c")
+
+lda_model_10 <- LatentDirichletAllocation$new(n_topics = 10, 
+                                              vocabulary = vocab,
+                                              doc_topic_prior = 0.1,
+                                              topic_word_prior = 0.1)
+
+doc_topic_distr_10 <- lda_model_10$fit_transform(dtm, n_iter = 1000, 
+                                           convergence_tol = 0.01,
+                                           check_convergence_every_n = 10)
+
+# lda_model_10$plot()
+```
+
+```{r uniformityPerYearPlot, fig.height = 7}
+lda_model_10$plot(out.dir = "./Reading_KCNA_headlines_files/ldavis_annual", lambda.step = 0.1, open.browser = FALSE)
+
+phi <- (lda_model_10$get_word_vectors() + 0.1) %>%
+  normalize("l1")
+
+topic_terms <- as_tibble(phi) %>%
+  mutate(terms = rownames(phi)) %>%
+  reshape2::melt(id.vars = "terms") %>%
+  group_by(variable) %>%
+  top_n(5) %>%
+  summarise(terms = paste(terms, collapse = ","))
+
+topic_terms <- topic_terms %>%
+  mutate(topic_descriptive = paste(c("1 Special days of Kims and the nation?", 
+         "2 Kim gifts and tributes?",
+         "8 International solidarity?",
+         "10 Anti-USA and other adversaries?",
+         "7 Diplomacy?",
+         "6 National unity?",
+         "3 Appreciation of Kim works?",
+         "4 Cultural and artistic achievement?",
+         "5 Economic and social development?",
+         "9 South Korea critique?"), terms, sep = "\n"),
+         order = str_extract(topic_descriptive, "[0-9]+") %>%
+           as.numeric())
+
+
+data <- doc_topic_distr_10 %>% 
+  as_tibble() %>%
+  bind_cols(year_id) %>%
+  gather(topic, tokens, V1:V10) %>%
+  group_by(id, topic) %>%
+  summarise(total_tokens = sum(tokens)) %>%
+  left_join(topic_terms %>%
+              rename(topic = variable) ) %>%
+  mutate(topic_descriptive = fct_reorder(topic_descriptive, order))
+
+rm(phi, topic_terms, doc_topic_distr_10)
+
+data %>%
+  ggplot(aes(x = id, y = total_tokens, fill = topic_descriptive)) +
+  geom_bar(width = 1, stat="identity", position = position_fill(reverse = TRUE)) +
+  guides(fill = guide_legend(ncol = 2, title.position = "top")) +
+  labs(fill = "Topic", color = "Topic", 
+       title = "Topic proportions per year",
+       y = "Proportion of topic\nfor all headlines in year",
+       subtitle = "Results from a topic model with ten topics, considering each year's headlines as a single document",
+       caption = str_wrap("Descritions of topics are from my interpretation of the results. Top 5 terms in each topic are also listed.", 120) %>%
+         paste(collapse = "\n")) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_brewer(palette = "Paired")
+
+rm(data, year_id)
+```
+
+(Note the increase in Kim topics in 2012, the year after the death of Kim Jong Il in December 2011. See a more detailed [interactive topic browser here](http://htmlpreview.github.io/?https://github.com/xmarquez/KCNA/blob/master/Reading_KCNA_headlines_files/ldavis_annual/index.html). Topic numbers in the interactive visualization will be different from those above).
+
+If we wanted to simplify this picture, we might say that KCNA spends about a quarter of the time praising and honoring the Kims, another quarter critiquing North Korea's adversaries, and the rest extolling North Korea's economic and cultural development and its cooperative disposition. The daily variation in these topics is of course much higher than their annual variation, but the trends are flat, and many (not all) peaks in some of these topics correspond to days where the topic is expected to peak (e.g., cult days for the "homage to Kims" topic):
+
+```{r uniformityPerDay, results='hide'}
+
+set.seed(1234)
+
+date_id <- processed_corpus %>%
+  distinct(date, processed_title) %>%
+  mutate(id = date)
+
+iter <- itoken(date_id$processed_title, 
+             tokenizer = tokenizing_function, 
+             ids = date_id$id, 
+             progressbar = FALSE)
+
+vocab <- create_vocabulary(iter,
+                           stopwords = tm::stopwords()) %>%
+  prune_vocabulary(term_count_min = 3)
+
+vectorizer <- vocab_vectorizer(vocab, 
+                               skip_grams_window = 5L)
+
+dtm <- create_dtm(iter, vectorizer, type = "lda_c")
+
+lda_model_10 <- LatentDirichletAllocation$new(n_topics = 10, 
+                                              vocabulary = vocab,
+                                              doc_topic_prior = 0.1,
+                                              topic_word_prior = 0.1)
+
+doc_topic_distr_10 <- lda_model_10$fit_transform(dtm, n_iter = 1000, 
+                                           convergence_tol = 0.01,
+                                           check_convergence_every_n = 10)
+
+```
+
+```{r dailyModelPlot, fig.height=3, fig.width = 4, fig.show='hold'}
+# For interactive viz:
+# lda_model_10$plot()
+
+phi <- (lda_model_10$get_word_vectors() + 0.1) %>%
+  normalize("l1")
+
+topic_terms <- as_tibble(phi) %>%
+  mutate(terms = rownames(phi)) %>%
+  reshape2::melt(id.vars = "terms") %>%
+  group_by(variable) %>%
+  top_n(5) %>%
+  summarise(terms = paste(terms, collapse = ","))
+
+topic_terms <- topic_terms %>%
+  mutate(topic_descriptive = paste(c("1 Special days of Kims and the nation?", 
+         "2 Kim gifts and tributes?",
+         "8 International solidarity?",
+         "10 Anti-USA and other adversaries?",
+         "7 Diplomacy?",
+         "6 National unity?",
+         "3 Appreciation of Kim works?",
+         "4 Cultural and artistic achievement?",
+         "5 Economic and social development?",
+         "9 South Korea critique?"), terms, sep = "\n"),
+         order = str_extract(topic_descriptive, "[0-9]+") %>%
+           as.numeric())
+
+
+data <- doc_topic_distr_10 %>% 
+  as_tibble() %>%
+  bind_cols(date_id) %>%
+  gather(topic, tokens, V1:V10) %>%
+  group_by(id, topic) %>%
+  summarise(total_tokens = sum(tokens)) %>%
+  left_join(topic_terms %>%
+              rename(topic = variable)) %>%
+  mutate(topic_descriptive = fct_reorder(topic_descriptive, order)) %>% 
+  group_by(id) %>%
+  mutate(prop_tokens = total_tokens/sum(total_tokens)) %>%
+  group_by(topic) %>%
+  mutate(is_peak = splus2R::peaks(prop_tokens, span = 301)) %>%
+  ungroup()
+
+daily_graph <- function(t) {
+  d <- data %>% filter(topic_descriptive == t)
+  p <- ggplot(data = d, aes(x = id, y = prop_tokens)) +
+    geom_line(alpha = 0.2) +
+    geom_smooth() +
+    labs(y = "Proportion of topic\nfor all headlines in day",
+         x = "") +
+    scale_y_continuous(labels = scales::percent) +
+    scale_x_date(breaks = d$id[ d$is_peak ]) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 0.5))+
+    facet_wrap(~topic_descriptive, scales = "free") 
+  print(p)
+}
+
+levels(data$topic_descriptive) %>% 
+  walk(daily_graph)
+```
+
+(I did some time-series decomposition of these topics, but because of missing headlines for some days and changes after the death of Kim Jong Il this turns out to be harder than it looks, so I won't bore you with the details, but nothing much changes -- trends remain flat, seasonal peaks seem to correspond many times to major anniversaries, and so on. But you might get better results with a supervised approach to classification in any case).
+
+Because the headlines by themselves are so short and cryptic, topic modeling may work better (i.e., give more interpretable results) when using the entire stories from KCNA. So here's the model fitted to the stories from 2011 (topics are not the same as those extracted by looking at the headlines only), with a great big spike in the "homage to the Kims" topic after the death of Kim Jong Il on 17 December:
+
+```{r storiesModel, results='hide'}
+
+rm(data, doc_topic_distr_10, phi, topic_terms, date_id, dtm, daily_graph, vocab, iter, lda_model_10)
+
+set.seed(1234)
+
+mentioned_2011 <- preprocessed_corpus %>% 
+  filter(year(date) == 2011,
+         !is.na(mentioned)) %>%
+  count(mentioned, sort = TRUE) %>%
+  left_join(person_categories %>%
+              distinct(mentioned, .keep_all = TRUE) %>%
+              select(-n, -uri) %>%
+              mutate(mentioned = str_replace_all(mentioned,
+                                                 "_"," ") %>%
+                       str_to_title())) %>%
+  mutate(replacement = str_replace_all(mentioned, " ", "_"))
+
+data <- KCNA_2011 %>% 
+  filter(!is.na(story), language == "en", !is.na(title)) %>%
+  mutate(id = seq_along(title)) %>%
+  left_join(preprocessed_corpus) %>%
+  filter(english)
+
+data$story <- qdap::mgsub(mentioned_2011$mentioned, mentioned_2011$replacement, data$story)
+
+iter <- itoken(data$story, 
+             tokenizer = tokenizing_function, 
+             ids = data$id, 
+             progressbar = FALSE)
+
+vocab <- create_vocabulary(iter,
+                           stopwords = tm::stopwords()) %>%
+  prune_vocabulary(term_count_min = 5)
+
+vectorizer <- vocab_vectorizer(vocab, 
+                               skip_grams_window = 5L)
+
+
+dtm <- create_dtm(iter, vectorizer, type = "lda_c")
+
+lda_model_10 <- LatentDirichletAllocation$new(n_topics = 10, 
+                                              vocabulary = vocab,
+                                              doc_topic_prior = 0.1,
+                                              topic_word_prior = 0.1)
+
+doc_topic_distr_10 <- lda_model_10$fit_transform(dtm, n_iter = 1000, 
+                                           convergence_tol = 0.01,
+                                           check_convergence_every_n = 10)
+
+
+
+```
+
+```{r storyModelPLot, fig.height = 3, fig.width = 4, fig.show='hold'}
+# lda_model_10$plot()
+lda_model_10$plot(out.dir = "./Reading_KCNA_headlines_files/ldavis", lambda.step = 0.1, open.browser = FALSE)
+
+phi <- (lda_model_10$get_word_vectors() + 0.1) %>%
+  normalize("l1")
+
+topic_terms <- as_tibble(phi) %>%
+  mutate(terms = rownames(phi)) %>%
+  reshape2::melt(id.vars = "terms") %>%
+  group_by(variable) %>%
+  top_n(5) %>%
+  summarise(terms = paste(terms, collapse = ","))
+
+topic_terms <- topic_terms %>%
+  mutate(topic_descriptive = paste(c("6 Diplomacy?", 
+         "10 World disasters?",
+         "4 Cultural and artistic achievement?",
+         "8 Critique of South Korea and int'l solidarity?",
+         "3 Economic and social development?",
+         "5 Sport?",
+         "9 Anti-adversaries?",
+         "7 Reunification?",
+         "1 Achievements of the Kims?",
+         "2 Homage to the Kims?"), terms, sep = "\n"),
+         order = str_extract(topic_descriptive, "[0-9]+") %>%
+           as.numeric())
+
+rm(phi)
+
+data <- doc_topic_distr_10 %>% 
+  as_tibble() %>%
+  bind_cols(data) %>%
+  gather(topic, tokens, V1:V10) %>%
+  group_by(date, title) %>%
+  mutate(percent_in_topic = tokens/sum(tokens)) 
+
+rm(doc_topic_distr_10, vocab, lda_model_10, iter, dtm)
+
+topic_proportions_per_date <- data %>%
+  group_by(date) %>%
+  mutate(total_tokens = sum(tokens)) %>%
+  group_by(date, topic) %>%
+  summarise(topic_proportion = sum(tokens)/unique(total_tokens)) %>%
+  left_join(topic_terms %>% rename(topic = variable)) %>%
+  ungroup() %>%
+  mutate(topic_descriptive = fct_reorder(topic_descriptive, order)) %>%
+  group_by(topic) %>%
+  mutate(is_peak = (date %in% date[ findpeaks(topic_proportion, bw = 31)[[1]] ])) %>%
+  ungroup()
+
+daily_graph <- function(t) {
+  d <- topic_proportions_per_date %>% filter(topic_descriptive == t)
+  p <- ggplot(data = d, aes(x = date, y = topic_proportion)) +
+    geom_line(alpha = 0.2) +
+    geom_smooth() +
+    labs(y = "Proportion of topic\nfor all headlines in day",
+         x = "") +
+    scale_y_continuous(labels = scales::percent) +
+    scale_x_date(breaks = d$date[ d$is_peak ]) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 0.5))+
+    facet_wrap(~topic_descriptive, scales = "free") 
+  print(p)
+}
+
+levels(topic_proportions_per_date$topic_descriptive) %>% 
+  walk(daily_graph)
+
+```
+
+And if you're interested, [here's an interactive topic browser](http://htmlpreview.github.io/?https://github.com/xmarquez/KCNA/blob/master/Reading_KCNA_headlines_files/ldavis/index.html) for the model (topic numbers are different from those above).
+
+Topic models do not always give intuitive results, and the specific terms that would be salient in a given model will vary depending on the random seed, the number of topics chosen, and the specific software used. But in general, it seems to be the case that KCNA propaganda is relatively uniform in time, with only large shocks (like the death of Kim Jong Il above) making much of a difference in its choice of topics.
+
+## Ceremonial Propaganda?
+
+In some ways, none of the patterns discussed above should be surprising. It is well known that North Korean propaganda is highly nationalistic; that it fosters a cult of the Kims; and that it can be filled with invective against the North's adversaries. But it is still interesting to see concretely how these patterns are manifested in content that can hardly have much persuasive effect, given its audience. KCNA propaganda is not, by the instrumental standards usually applied to these matters, a great success for outside audiences (unlike, e.g., the information operations of the Russian state, or perhaps the internal propaganda used in North Korea itself). As a kind of literature, however, displaying a fictional picture of reality without much regard for its effectiveness, there is something remarkable in the single-mindedness of its adherence to its own self-imposed canons.
+
+## Data and code technical details
+
+I've bundled the data used to produce this post in an R package, available from [this repository](https://github.com/xmarquez/KCNA). To install from R, use `devtools::install_github(repo = "xmarquez/KCNA")`. Check the Readme file for more info. The code used to produce this post is available [here as an .Rmd file](https://github.com/xmarquez/KCNA/blog_post/Reading_KCNA_headlines.Rmd); there may be a paper eventually too. 
+
+Finally, a couple of shout outs. [Julia Silge's `tidytext` package](http://juliasilge.com/blog/Life-Changing-Magic/) is great -- it really simplifies text analysis! If you do any kind of text analysis, I highly recommend it. And [Dmitriy Selivanov](http://dsnotes.com/)'s [`text2vec` package](http://text2vec.org/) implementation of topic modeling and word vector embedding is superfast and powerful; also highly recommended. 
+
+[^changes]: It may have changed by now, though I doubt it. I can't access it anymore, so I wouldn't know. 
+
+[^details]: For those who care about the details, the exponent is around 1.5 for the top 44 or so most mentioned people.
+
+[^sentimentCorrelations]: Sentiment scores obtained with other sentiment lexicons are correlated at the 0.7-0.8 level.
+
+[^lexiconDifferences]: Different sentiment lexicons show somewhat different patterns -- the AFINN or BING lexicons may give more weight to some other words in scoring the overall negative or positive sentiment of a headline -- but nothing really affecting the larger picture.
+
+[^more]: If you download the package used in this post, you can try more of these graphs on your own. Try "bush" for some further choice invective, or "communism" to note the paucity of classical marxsit language.
+
+[^Glove]: See [this NYTimes Magazine piece on AI at Google](https://www.nytimes.com/2016/12/14/magazine/the-great-ai-awakening.html?_r=0) for a non-technical explanation of how word vector embeddings work and what they capture. This is surprisingly easy to do with a small corpus like the KCNA headlines thanks to the fantastic [text2vec R package](http://text2vec.org/) by [Dmitriy Selivanov](http://dsnotes.com/), even on an old crappy computer. AI for the masses!
+
+[^model]: One could model this properly by creating a model to  predict the year from the words in the headlines -- but I haven't gotten around to it.

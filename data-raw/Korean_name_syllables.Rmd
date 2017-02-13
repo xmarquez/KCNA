@@ -1,0 +1,233 @@
+---
+title: "List of Korean Name Syllables"
+author: "Xavier Marquez"
+date: "6 July 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache= TRUE, cache.rebuild = TRUE)
+```
+
+The list of Korean name components is derived from the tables in https://en.wikipedia.org/wiki/List_of_Korean_given_names and https://en.wikipedia.org/wiki/List_of_Korean_family_names, plus a small number of syllables that are missing in these but are found in the KCNA headlines.
+
+```{r read_data}
+library(dplyr)
+library(stringr)
+library(rvest)
+
+korean_given_names <- read_html("https://en.wikipedia.org/wiki/List_of_Korean_given_names") %>%
+  html_table()
+
+korean_family_names <- read_html("https://en.wikipedia.org/wiki/List_of_Korean_family_names") %>%
+  html_table() %>%
+  .[[1]] %>% select(-Hangul,-Hanja)
+
+```
+
+The tables need a lot of cleaning up. First we do the family names:
+
+```{r clean_up_family_name}
+library(tidyr)
+
+names(korean_family_names)[4] <- "est_distribution"
+
+korean_family_names <- reshape2::melt(korean_family_names,id.var="est_distribution") %>%
+  transform(value = str_split(value, "[,.\\n]")) %>%
+  unnest(value) %>% 
+  filter(value != "") %>%
+  mutate(value = str_replace_all(value," \\(.+\\).*$",""), value = str_trim(value, side = "both"))
+
+knitr::kable(korean_family_names)
+```
+
+Now we clean up the given names. First the first syllable:
+
+```{r clean_up_given_name}
+
+library(purrr)
+library(reshape2)
+library(tidyr)
+
+normal_korean_names <- korean_given_names[c(1:6)] %>% 
+  map_df(.f = melt,id.vars = NULL, na.rm=TRUE, .id = "table") %>% 
+  filter(value !="", value != " ") %>% 
+  select(-variable) %>% 
+  separate_rows(value, sep ="/") %>%
+  separate(value, into = c("first_syllable","second_syllable")) 
+
+normal_korean_names %>%
+  knitr::kable()
+
+first_syllable <- unique(normal_korean_names$first_syllable)
+
+second_syllable <- unique(normal_korean_names$second_syllable)
+
+first_syllable <- c(first_syllable,korean_given_names[[8]][,1],str_trim(korean_given_names[[8]][,3]),str_trim(korean_given_names[[8]][,4]))
+
+first_syllable <- unique(first_syllable)
+
+first_syllable <- c(first_syllable,unique(str_replace(korean_given_names[[9]][,1],"-.+$","")),unique(str_replace(korean_given_names[[9]][,3],"-.+$","")),unique(str_replace(korean_given_names[[9]][,4],"-.+$","")))
+
+first_syllable <- unique(first_syllable)
+
+first_syllable <- c(first_syllable,unique(str_replace(korean_given_names[[10]][,1],"-.+$","")),unique(str_replace(korean_given_names[[10]][,3],"-.+$","")),unique(str_replace(korean_given_names[[10]][,4],"-.+$","")))
+
+first_syllable <- unique(first_syllable)
+
+first_syllable <- c(first_syllable,unique(str_replace(korean_given_names[[11]][,1],"-.+$","")),unique(str_replace(korean_given_names[[11]][,3],"-.+$","")),unique(str_replace(korean_given_names[[11]][,4],"-.+$","")))
+
+first_syllable <- unique(first_syllable)
+
+first_syllable <- stringr::str_conv(first_syllable,"UTF-8")
+
+first_syllable <- stringr::str_replace_all(first_syllable, " \\(.+$", "")
+
+
+
+```
+
+Then the second syllable:
+
+```{r second_syllable_extraction}
+
+second_syllable <- c(second_syllable,unique(str_replace(korean_given_names[[9]][,1],"^.+-","")),unique(str_replace(korean_given_names[[9]][,3],"^.+-","")),unique(str_replace(korean_given_names[[9]][,3],"^.+-","")))
+
+second_syllable <- unique(second_syllable)
+
+second_syllable <- c(second_syllable,unique(str_replace(korean_given_names[[10]][,1],"^.+-","")),unique(str_replace(korean_given_names[[10]][,3],"^.+-","")),unique(str_replace(korean_given_names[[10]][,4],"^.+-","")))
+
+second_syllable <- unique(second_syllable)
+
+second_syllable <- str_to_title(second_syllable)
+
+second_syllable <- stringr::str_conv(second_syllable,"UTF-8")
+
+first_syllable <- unique(c(first_syllable,second_syllable))
+
+sort(first_syllable)
+
+second_syllable <- unique(c(first_syllable,second_syllable))
+
+sort(second_syllable)
+```
+
+Then we add some extras from a list of trigrams:
+
+```{r add_from_trigrams}
+
+trigrams2 <- readr::read_csv("./trigrams.csv")
+
+family_name <- str_to_lower(korean_family_names  %>% .$value)
+
+first_syllable <- str_to_lower(first_syllable)
+
+second_syllable <- str_to_lower(second_syllable)
+
+family_name <- c(family_name,trigrams2 %>% filter(!(V1 %in% family_name)) %>% .$V1 %>% unique())
+
+first_syllable <- c(first_syllable,trigrams2 %>% filter(!(V2 %in% first_syllable)) %>% .$V2 %>% unique())
+
+first_syllable <- c(first_syllable,c("si","pan","un","pong","ok","son", "gyun", "sa", "po", "am", "mong", "kon", "wang","to","moo", "san", "sat", "yon", "kwon", "bul"))
+
+second_syllable <- c(second_syllable,trigrams2 %>% filter(!(V3 %in% second_syllable)) %>% .$V3 %>% unique())
+
+second_syllable <- c("san","son","on", "gyon", "gyun", "po", "am", "mong", "kon", "wang", "an", "hon", "ma", "yon", "sin", "jak", "gat", "muk", "bong", "sin", second_syllable)
+
+second_syllable <- second_syllable[ !grepl("grees|thanh",second_syllable) ]
+
+sort(family_name)
+
+sort(first_syllable)
+
+sort(second_syllable)
+
+korean_names <- list(family_name = family_name, first_syllable = first_syllable, second_syllable = second_syllable)
+
+```
+
+We check that it captures enough people:
+
+```{r mentions_of_koreans, dependson=-1}
+
+library(tidytext)
+
+corpus_tokens <- unnest_tokens(KCNA::preprocessed_corpus %>% distinct(title), 
+                               output = words, 
+                               input = title, 
+                               drop=FALSE, token = "regex", 
+                               pattern = "[[:punct:]\\s]", collapse = FALSE)
+
+
+corpus_tokens <- corpus_tokens %>%
+  group_by(title) %>%
+  mutate(words_2 = lead(words), words_3 = lead(words_2)) %>%
+  ungroup()
+
+mentioned <- corpus_tokens %>%
+  select(words, words_2,words_3, title) %>%
+  filter(words %in% korean_names$family_name,
+         words_2 %in% c(korean_names$first_syllable), 
+         words_3 %in% c(korean_names$second_syllable),
+         str_detect(title,str_to_title(paste(words,words_2,words_3)))) %>%
+  distinct(words,words_2,words_3) %>%
+  mutate(mentioned = str_to_title(paste(words,words_2,words_3)))
+
+nrow(mentioned)
+
+knitr::kable(head(mentioned))
+
+corpus_tokens <- left_join(corpus_tokens,mentioned)
+
+corpus_mentions <- corpus_tokens %>%
+  filter(!is.na(mentioned)) %>%
+  distinct(title,mentioned)
+
+preprocessed_corpus <- left_join(KCNA::preprocessed_corpus %>% select(-mentions_korean, -mentioned), corpus_mentions) %>%
+  mutate(mentions_korean = !is.na(mentioned))
+
+word_data <- preprocessed_corpus %>%
+  mutate(old_title = title, title = str_to_lower(title))
+
+mentioned <- mentioned %>%
+  mutate(change_to = str_replace_all(mentioned," ", "_"))
+
+word_data$title <- qdap::mgsub(paste0("\\b",str_to_lower(mentioned$mentioned),"\\b"),
+                               mentioned$change_to,
+                               word_data$title,
+                               fixed = FALSE, ignore.case = TRUE, perl=TRUE)
+
+word_data %>% 
+  filter(grepl("_",title)) %>%
+  sample_n(10) %>%
+  distinct(date, title, old_title) %>%
+  knitr::kable()
+
+word_data %>%
+  filter(grepl("[A-Z][a-z]{1,3} [A-Z][a-z]{1,3} [A-Z][a-z]{1,3}\\b",old_title), !mentions_korean) %>%
+  distinct(title,old_title) %>%
+  knitr::kable()
+```
+
+And we check that it captures only people:
+
+```{r captures_people, dependson=-1}
+
+word_data %>%
+  filter(grepl("_",title)) %>%
+  group_by(mentioned) %>%
+  summarise(sample_title = sample(title,1), total = n()) %>%
+  ungroup() %>%
+  arrange(desc(total)) %>%
+  knitr::kable()
+
+```
+
+Finally we create a list and save:
+
+```{r save_data}
+
+devtools::use_data(korean_names,overwrite=TRUE)
+
+```
+
