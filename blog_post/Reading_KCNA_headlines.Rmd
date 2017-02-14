@@ -1,6 +1,6 @@
 ---
 title: "Propaganda as Literature: A Distant Reading of the Korean Central News Agency's Headlines"
-author: "Xavier Marquez"
+author: "[Xavier Marquez](http://abandonedfootnotes.blogspot.com)"
 output: 
   html_document: 
     self_contained: no
@@ -30,7 +30,7 @@ theme_set(theme_bw())
 theme_update(legend.position = "bottom")
 ```
 
-(Warning: long and exhaustive discussion of propaganda that nobody reads or cares about, by a non-specialist in North Korean politics. Contains complicated interactive graphs best viewed on a laptop or desktop computer). 
+(Warning: long and exhaustive discussion of propaganda that nobody reads or cares about, by [a non-specialist in North Korean politics](http://abandonedfootnotes.blogspot.com). Contains complicated interactive graphs best viewed on a laptop or desktop computer). 
 
 I've always been a bit puzzled about the existence of the Korean Central News Agency (KCNA) [website](http://www.kcna.co.jp/index-e.htm) in Japan. The site is defiantly Web 1.0: no pictures, static HTML, formulaic headlines in English and Spanish that would not have been out of place in a 1950s edition of *Pravda*.[^changes] It's not clickbait, to say the least, and one struggles to imagine that the stories there can actually inform or persuade anyone of anything. 
 
